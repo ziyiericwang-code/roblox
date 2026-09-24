@@ -410,3 +410,12 @@ h3.ready { color: #f3dfa6; }
 .ladder .lt { width: 100%; font-size: 11px; color: #aeb7be; letter-spacing: .1em; text-transform: uppercase; margin-top: 4px; }
 .map-cmds .btn { font-weight: 700; }
 .mi-h.small { font-size: 12px; margin-top: 8px; }
+
+/* admin button: visible to admins on every screen */
+.admin-btn { display: none; position: fixed; right: 0; top: 42%; z-index: 58; writing-mode: vertical-rl; padding: 12px 6px; background: rgba(40,32,12,.92); color: #f3dfa6; border: 1px solid #c9a44a; border-right: none; border-radius: 6px 0 0 6px; font-weight: 700; letter-spacing: .12em; cursor: pointer; pointer-events: auto; }
+body.is-admin .admin-btn { display: block; }
+.admin-btn:hover { background: rgba(70,56,20,.95); }
+.sandbox { z-index: 59; }
+.sb-quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 8px; border-bottom: 1px solid rgba(255,255,255,.1); margin-bottom: 6px; }
+.sb-quick .btn:first-child { background: #c9a44a; color: #1a1406; font-weight: 700; }
+.tt-sandbox { margin-top: 8px; font-weight: 700; }

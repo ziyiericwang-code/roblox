@@ -1,4 +1,4 @@
-// Basic training: a short interactive course at Fort Sentinel (~4 minutes)
+// Basic training: a short interactive course at the army headquarters (~4 minutes)
 // covering movement, shooting, objectives, commands, vehicles and medical.
 // Also runs the marksmanship qualification on any base range.
 import { LIFE, STANCE, FACTION_INFO } from '../../shared/constants.js';
@@ -7,7 +7,7 @@ import { MSG } from '../../shared/protocol.js';
 import { dist2D } from '../../shared/math.js';
 
 export const TRAINING_STEPS = [
-  { id: 'move', text: 'Welcome to Fort Sentinel, Recruit. Move to the obstacle course (WASD / left stick).', hint: 'Follow the marker.' },
+  { id: 'move', text: 'Welcome to headquarters, Recruit. Move to the obstacle course (WASD / left stick).', hint: 'Follow the marker.' },
   { id: 'course', text: 'Run the course: jump the walls (Space) and crawl under the wire (Z to go prone).', hint: 'Sprint with Shift between obstacles.' },
   { id: 'range', text: 'Head to the firing range and hit 5 targets. Hold right mouse to aim down sights.', hint: 'Short controlled bursts.' },
   { id: 'reload', text: 'Reload your weapon (R).', hint: 'Always reload behind cover.' },
@@ -106,7 +106,7 @@ export class TrainingSystem {
     p.trainingSkipped = !!skipped;
     if (!skipped) {
       g.progression.award(session, { xp: XP.trainingComplete, credits: 150, reason: 'Basic training complete', cat: 'training', rewardId: 'train:complete', noMult: true });
-      g.progression.record(session, 'milestone', 'Completed basic training at Fort Sentinel');
+      g.progression.record(session, 'milestone', `Completed basic training at ${g.world.bases[session.faction].name}`);
       g.progression.addStat(session, 'training', 1);
     } else {
       g.progression.record(session, 'milestone', 'Waived basic training');

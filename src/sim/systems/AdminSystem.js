@@ -168,6 +168,12 @@ export class AdminSystem {
         const m = g.missions.debugStart ? g.missions.debugStart(session, msg.kind) : null;
         return m ? ok(`Mission started: ${m.title}`) : fail('No mission of that kind here');
       }
+      case 'cp': {
+        const f = session.faction;
+        g.war.cp[f] = Math.max(g.war.cp[f] || 0, 300);
+        g.commands.sendState(session);
+        return ok('Command Points filled');
+      }
       case 'god':
         session.god = !!msg.on;
         return ok(`Invulnerability ${session.god ? 'on' : 'off'}`);

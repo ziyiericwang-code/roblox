@@ -15,7 +15,7 @@ export class TitleScreen {
     const solo = h('button', { class: 'btn big', onclick: () => go('solo') }, 'PLAY — SOLO CAMPAIGN');
     const mp = h('button', { class: 'btn big sec', onclick: () => go('mp') }, 'JOIN MULTIPLAYER SERVER');
     mp.style.display = opts.multiplayer ? '' : 'none';
-    const sandbox = h('button', { class: 'btn tiny sec tt-sandbox', title: 'A separate offline test world where you are the admin: set any rank, teleport, spawn, start wars. Your real career is not affected.', onclick: () => go('sandbox') }, 'Sandbox test world');
+    const sandbox = h('button', { class: 'btn tiny sec tt-sandbox', title: 'A separate offline test world where you are the admin: set any rank, teleport, spawn, start wars. Your real career is not affected.', onclick: () => go('sandbox') }, '⚙ ADMIN SANDBOX — any rank, spawn, start wars');
     const go = (mode) => {
       const n = name.value.trim();
       if (n.length < 2) {

@@ -212,7 +212,7 @@ export class DeployScreen {
       }
     }
     const tr = s.get('training');
-    if (tr && tr.active) status = 'Recruit: complete basic training at Fort Sentinel to earn the rank of Private.';
+    if (tr && tr.active) status = `Recruit: complete basic training at ${(app.world.bases[app.store.get('faction')] || {}).name || 'headquarters'} to earn the rank of Private.`;
     this.$.status.textContent = status;
   }
 

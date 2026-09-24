@@ -15,7 +15,9 @@ export class Sandbox {
     this.admin = false;
     this.el = h('div', { class: 'sandbox' });
     this.perfEl = h('div', { class: 'perfmon' });
-    root.append(this.el, this.perfEl);
+    // always-visible button for admins (no need to remember the key)
+    this.btn = h('button', { class: 'admin-btn', title: 'Admin panel (` or F2)', onclick: () => this.toggle() }, '⚙ ADMIN');
+    root.append(this.el, this.perfEl, this.btn);
     this.state = null;
   }
 
@@ -67,6 +69,17 @@ export class Sandbox {
     const country = sel(COUNTRY_IDS.map((f) => [f, FACTION_INFO[f].short]), app.store.get('faction'));
     this.el.append(
       h('div', { class: 'sb-h' }, 'SANDBOX · ADMIN', btn('×', () => this.toggle(), 'sec')),
+      h('div', { class: 'sb-quick' },
+        btn('★ Make me General of the Army', () => this.cmd({ cmd: 'rank', rank: RANKS.length - 1 })),
+        btn('Full Command Points', () => this.cmd({ cmd: 'cp' }), 'sec'),
+        btn('God mode + open doors', () => {
+          this.cmd({ cmd: 'god', on: true });
+          this.cmd({ cmd: 'bypass', on: true });
+        }, 'sec'),
+        btn('Open war map', () => {
+          this.toggle();
+          app.menu.open('map');
+        }, 'sec')),
       row('Rank', rank, btn('Set', () => this.cmd({ cmd: 'rank', rank: Number(rank.value) }))),
       row('Country', country, btn('Transfer', () => this.cmd({ cmd: 'country', country: Number(country.value) }))),
       row('Teleport', place, btn('Go', () => this.cmd({ cmd: 'tp', to: place.value }))),
