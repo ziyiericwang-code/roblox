@@ -1,7 +1,8 @@
-node_modules/
-dist/
-data/
 *.log
 .DS_Store
-test-results/
+data-e2e/
+data/
+dist/
+node_modules/
 screenshots/
+test-results/
