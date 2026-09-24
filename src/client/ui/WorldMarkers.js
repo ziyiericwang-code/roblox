@@ -73,7 +73,8 @@ export class WorldMarkers {
         const t = app.world.tById[tw.id];
         if (!t || t.isBase) continue;
         const near = dist(t.x, t.z) < t.radius * 2.2;
-        if (!near && !tw.battle) continue;
+        // distant battles stay on the map/compass; only nearby ones get flags
+        if (!near && (!tw.battle || dist(t.x, t.z) > t.radius + 380)) continue;
         for (const s of tw.sectors) {
           const sd = t.sectors.find((q) => q.id === s.id);
           if (!sd) continue;

@@ -80,7 +80,10 @@ export class MissionSystem {
     this.missions.set(m.id, m);
     this.setup(m);
     this.recent.set(`${type}:${m.tid}`, g.time);
-    g.radio(F, 'intel', 'Operations', `New mission: ${m.title} (${DIFFICULTY_NAMES[m.difficulty]}).`);
+    // routine missions just appear in the mission list; only notable ones are radioed
+    if (m.difficulty >= 3 || m.opId || m.eventId || type === 'defend') {
+      g.radio(F, 'intel', 'Operations', `New mission: ${m.title} (${DIFFICULTY_NAMES[m.difficulty]}).`);
+    }
     this.changed();
     return m;
   }

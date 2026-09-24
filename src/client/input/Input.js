@@ -361,6 +361,8 @@ export class TouchControls {
   }
 
   show(v) {
+    if (this.shown === v) return;
+    this.shown = v;
     this.el.style.display = v ? '' : 'none';
   }
 }

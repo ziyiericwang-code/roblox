@@ -646,6 +646,8 @@ export class App {
     this.drawFloats();
     this.menu.update(dt);
     this.deploy.update(dt);
+    // touch controls only while actually playing (not under the deploy screen or menus)
+    if (this.touch) this.touch.show(!!this.player.alive && !this.menu.isOpen && !this.deploy.visible);
     input.endFrame();
   }
 
