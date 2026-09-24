@@ -1,0 +1,26 @@
+{
+  "name": "frontline-command",
+  "version": "1.0.0",
+  "description": "Frontline Command - a large-scale multiplayer military career + battlefield + strategy game for the browser.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node src/server/index.js",
+    "serve": "node src/server/index.js",
+    "dev": "node scripts/build.mjs --watch & node src/server/index.js",
+    "test": "node --test test/",
+    "e2e": "node scripts/e2e.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "playwright-core": "^1.48.0"
+  }
+}
