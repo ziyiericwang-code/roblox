@@ -171,7 +171,9 @@ export class WarSystem {
         b.initial = bd.initial || b.initial;
       }
     }
-    for (const [id, st] of data.buildings || []) if (st > 0) this.buildingState.set(id, Math.min(3, st));
+    for (const [id, st] of data.buildings || []) {
+      if (st > 0 && g.world.destruction.apply(id, st)) this.buildingState.set(id, Math.min(3, st));
+    }
     // guarantee every territory has some defenders after a restore
     for (const w of this.map.values()) if (!this.strengthAt(w.id, w.owner)) this.createForce(w.owner, w.id, WAR.minGarrison, 'infantry', w.isBase ? 'reserve' : 'garrison');
   }
@@ -1209,9 +1211,11 @@ export class WarSystem {
     const next = Math.min(3, cur + n);
     if (next === cur) return;
     this.buildingState.set(bid, next);
+    this.game.world.destruction.apply(bid, next);
     this.buildingVersion++;
     this.dirtyBuildings.push([bid, next]);
     this.game.warDirty = true;
+    return next;
   }
 
   repairBuildings() {
@@ -1223,6 +1227,7 @@ export class WarSystem {
         if (!st || !this.rng.chance(0.08)) continue;
         if (st <= 1) this.buildingState.delete(bid);
         else this.buildingState.set(bid, st - 1);
+        this.game.world.destruction.apply(bid, st - 1);
         this.buildingVersion++;
         this.dirtyBuildings.push([bid, st - 1]);
         break;
@@ -1570,6 +1575,7 @@ export class WarSystem {
         s.gaining = 0;
       }
     }
+    for (const bid of this.buildingState.keys()) g.world.destruction.apply(bid, 0);
     this.buildingState.clear();
     this.buildingVersion++;
     this.dirtyBuildings.push(['reset']);

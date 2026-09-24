@@ -9,6 +9,7 @@ export const BINDINGS = {
   command: ['KeyV'], emote: ['KeyY'], map: ['KeyM'], menu: ['Tab'], squad: ['KeyP'], missions: ['KeyJ'],
   redeploy: ['KeyX'], camera: ['KeyK'], slot1: ['Digit1'], slot2: ['Digit2'], slot3: ['Digit3'], slot4: ['Digit4'], slot5: ['Digit5'],
   descend: ['KeyC', 'ControlLeft'], fire: ['Mouse0'], aim: ['Mouse2'], escape: ['Escape'], firemode: ['KeyB'],
+  promote: ['KeyU'], sandbox: ['Backquote', 'F2'],
 };
 
 export class Input {

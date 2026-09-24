@@ -7,7 +7,7 @@ import { VEHICLE_CODES } from '../../shared/combat.js';
 import { FACTION } from '../../shared/constants.js';
 
 const SKINS = [null, 0xa8936a, 0xcfd4d6, 0x62666b];
-const FACTION_BODY = { [FACTION.COALITION]: 0x4d5530, [FACTION.DOMINION]: 0x45494d };
+const FACTION_BODY = { [FACTION.ALDMARK]: 0x4d5530, [FACTION.KARSA]: 0x45494d, [FACTION.SERAVIA]: 0x7a6a45 };
 
 function mesh(geo, mat, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -35,7 +35,7 @@ class VehicleModel {
     this.darkMat = new THREE.MeshStandardMaterial({ color: 0x1e2022, roughness: 0.7, metalness: 0.3 });
     this.tireMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.95 });
     this.glassMat = new THREE.MeshStandardMaterial({ color: 0x223038, roughness: 0.15, metalness: 0.6 });
-    this.canvasMat = new THREE.MeshStandardMaterial({ color: faction === FACTION.DOMINION ? 0x3c3f42 : 0x5b5a3c, roughness: 0.95 });
+    this.canvasMat = new THREE.MeshStandardMaterial({ color: faction === FACTION.KARSA ? 0x3c3f42 : faction === FACTION.SERAVIA ? 0x8a7a55 : 0x5b5a3c, roughness: 0.95 });
     this.lightMat = new THREE.MeshStandardMaterial({ color: 0x777766, emissive: 0xfff2c0, emissiveIntensity: 0 });
     this.wheels = [];
     this.turret = null;

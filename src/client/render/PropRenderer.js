@@ -171,7 +171,7 @@ export class PropRenderer {
           }
         }
       }
-      if (it.k === 4 && it.faction === FACTION.DOMINION && it.type === PROP_KIND.RALLY_POINT) g.visible = false;
+      if (it.k === 4 && it.faction !== this.myFaction && it.type === PROP_KIND.RALLY_POINT) g.visible = false;
     }
     for (const [key, o] of this.objs) {
       if (!seen.has(key)) {

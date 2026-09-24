@@ -3,12 +3,13 @@
 import { Game } from '../../sim/Game.js';
 import { createLocalPair } from './Transport.js';
 
-const PREFIX = 'frontline.';
-
 export class LocalStorageStore {
+  constructor(prefix = 'frontline.') {
+    this.prefix = prefix;
+  }
   get(key) {
     try {
-      const v = localStorage.getItem(PREFIX + key);
+      const v = localStorage.getItem(this.prefix + key);
       return v ? JSON.parse(v) : null;
     } catch {
       return null;
@@ -16,7 +17,7 @@ export class LocalStorageStore {
   }
   set(key, value) {
     // throws on quota errors so the Game's retry logic can handle it
-    localStorage.setItem(PREFIX + key, JSON.stringify(value));
+    localStorage.setItem(this.prefix + key, JSON.stringify(value));
   }
   async loadProfile(id) {
     return this.get(`profile.${id}`);
@@ -41,9 +42,10 @@ export class LocalStorageStore {
   }
 }
 
-export async function startSolo(world) {
-  const store = new LocalStorageStore();
-  const game = new Game({ world, store, log: console, options: { solo: true } });
+// sandbox: a separate offline world and career where the player is an admin
+export async function startSolo(world, { sandbox = false } = {}) {
+  const store = new LocalStorageStore(sandbox ? 'frontline.sandbox.' : 'frontline.');
+  const game = new Game({ world, store, log: console, options: { solo: true, sandbox } });
   await game.init();
   game.start();
   const { client, server } = createLocalPair();

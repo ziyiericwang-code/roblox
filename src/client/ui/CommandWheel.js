@@ -2,11 +2,11 @@
 // location, pick an order. Officers can widen the scope (squad -> theater);
 // quick officer abilities sit under the wheel.
 import { h, clear } from './dom.js';
-import { ORDERS, ORDER_IDS, ABILITIES } from '../../shared/config/commands.js';
-import { rankOf, SCOPE_NAMES, SCOPE } from '../../shared/config/ranks.js';
+import { ORDERS, ORDER_IDS, ABILITIES, canUseAbility } from '../../shared/config/commands.js';
+import { rankOf, SCOPE_NAMES, SCOPE, RANK } from '../../shared/config/ranks.js';
 import { MSG } from '../../shared/protocol.js';
 
-const QUICK = ['rally_point', 'ammo_drop', 'mark_target', 'fireteam', 'smoke_screen', 'supply_drop', 'reinforce', 'artillery', 'air_support'];
+const QUICK = ['rally_point', 'ammo_drop', 'uav_recon', 'mark_target', 'fireteam', 'rally_cry', 'smoke_screen', 'supply_drop', 'reinforce', 'artillery', 'air_support'];
 
 export class CommandWheel {
   constructor(root, app) {
@@ -42,7 +42,12 @@ export class CommandWheel {
     this.open = false;
     this.el.classList.remove('on');
     this.app.input.enabled = !this.app.menu.isOpen && !this.app.deploy.visible;
-    if (issue && this.sel >= 0) this.issue(ORDER_IDS[this.sel]);
+    if (issue && this.sel >= 0) {
+      const id = ORDER_IDS[this.sel];
+      const r = rankOf(this.app.store.get('profile').rank);
+      if (r.orders.includes(id)) this.issue(id);
+      else this.app.hud.toast(`${ORDERS[id].name.toUpperCase()} is not available at your rank`, 'warn');
+    }
   }
 
   issue(orderId) {
@@ -70,7 +75,8 @@ export class CommandWheel {
     ORDER_IDS.forEach((id, i) => {
       const o = ORDERS[id];
       const a = (i / ORDER_IDS.length) * Math.PI * 2 - Math.PI / 2;
-      const b = h('button', { class: `cw-opt${this.sel === i ? ' on' : ''}`, style: { left: `${50 + Math.cos(a) * 38}%`, top: `${50 + Math.sin(a) * 38}%`, '--c': o.color }, onclick: () => {
+      const allowed = r.orders.includes(id);
+      const b = h('button', { class: `cw-opt${this.sel === i ? ' on' : ''}${allowed ? '' : ' off'}`, disabled: allowed ? undefined : true, style: { left: `${50 + Math.cos(a) * 38}%`, top: `${50 + Math.sin(a) * 38}%`, '--c': o.color }, onclick: () => {
         this.sel = i;
         this.hide(true);
       } }, h('span', { class: 'cw-i' }, o.icon), h('span', {}, o.name));
@@ -88,7 +94,7 @@ export class CommandWheel {
       el.appendChild(sc);
     }
     const cmd = app.store.get('cmd') || {};
-    const quick = QUICK.filter((id) => p.rank >= ABILITIES[id].minRank);
+    const quick = QUICK.filter((id) => canUseAbility(p.rank, ABILITIES[id]));
     if (quick.length) {
       const row = h('div', { class: 'cw-abilities' });
       for (const id of quick) {
@@ -104,7 +110,8 @@ export class CommandWheel {
       }
       el.appendChild(row);
     }
-    if (p.rank < 4) el.appendChild(h('div', { class: 'cw-note' }, 'You can issue orders from the rank of Corporal. Follow your leaders\' orders to earn bonus XP.'));
+    if (p.rank < RANK.CORPORAL) el.appendChild(h('div', { class: 'cw-note' }, 'You can issue orders from the rank of Corporal. Follow your leaders\' orders to earn bonus XP.'));
+    else if (p.rank === RANK.CORPORAL) el.appendChild(h('div', { class: 'cw-note' }, 'Corporals lead fireteams: MOVE, FOLLOW, HOLD, REGROUP. Sergeants add ATTACK, DEFEND and RETREAT.'));
   }
 
   // mouse movement selects a wedge while the wheel is held

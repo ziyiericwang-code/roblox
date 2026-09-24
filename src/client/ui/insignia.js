@@ -17,6 +17,7 @@ function chevrons(n, rockers, center) {
   }
   if (center === 'diamond') out += `<path d="M32 30 L37 36 L32 42 L27 36 Z" fill="${GOLD}"/>`;
   if (center === 'star') out += star(32, 36, 6, GOLD);
+  if (center === 'eagle') out += `<path d="M32 30 L35 35 L42 33 L37 39 L32 44 L27 39 L22 33 L29 35 Z" fill="${GOLD}"/>`;
   return out;
 }
 
@@ -36,6 +37,8 @@ export function insigniaSVG(rankIndex, size = 40) {
   switch (ins.type) {
     case 'chevron':
       body = chevrons(ins.n, ins.rockers || 0, ins.center);
+      if (ins.outline) body = body.replace(/fill="[^"]+"/g, 'fill="none" stroke="#d6b25e" stroke-width="2"');
+      if (ins.wreath) body += '<path d="M14 44 Q10 30 18 22 M50 44 Q54 30 46 22" stroke="#d6b25e" stroke-width="3" fill="none"/>';
       break;
     case 'shield':
       body = `<path d="M14 14 Q32 6 50 14 L50 34 Q32 54 14 34 Z" fill="${GOLD}"/><path d="M26 22 L32 20 L38 22 L38 30 Q32 38 26 30 Z" fill="#2a2a2a"/>`;
@@ -56,8 +59,15 @@ export function insigniaSVG(rankIndex, size = 40) {
       break;
     case 'star': {
       const n = ins.n;
-      const pos = n === 1 ? [[32, 32]] : n === 2 ? [[20, 32], [44, 32]] : n === 3 ? [[14, 32], [32, 32], [50, 32]] : [[20, 20], [44, 20], [20, 44], [44, 44]];
-      body = pos.map(([x, y]) => star(x, y, n >= 3 ? 10 : 13, SILVER)).join('');
+      const pos = n === 1 ? [[32, 32]] : n === 2 ? [[20, 32], [44, 32]] : n === 3 ? [[14, 32], [32, 32], [50, 32]] : n === 4 ? [[20, 20], [44, 20], [20, 44], [44, 44]]
+        : [0, 1, 2, 3, 4].map((i) => [32 + Math.cos(-Math.PI / 2 + (i * 2 * Math.PI) / 5) * 19, 34 + Math.sin(-Math.PI / 2 + (i * 2 * Math.PI) / 5) * 19]);
+      body = pos.map(([x, y]) => star(x, y, n >= 5 ? 8 : n >= 3 ? 10 : 13, n >= 5 ? GOLD : SILVER)).join('');
+      break;
+    }
+    case 'warrant': {
+      body = `<rect x="22" y="8" width="20" height="48" rx="3" fill="${SILVER}"/>`;
+      if (ins.line) body += `<rect x="30" y="12" width="4" height="40" fill="#222"/>`;
+      else for (let i = 0; i < ins.n; i++) body += `<rect x="28" y="${14 + i * 10}" width="8" height="6" fill="#222"/>`;
       break;
     }
     default:

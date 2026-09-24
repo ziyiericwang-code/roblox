@@ -508,6 +508,19 @@ export class CombatSystem {
         }
       }
     }
+    // buildings: heavy blasts push nearby buildings through their damage states
+    if (R >= 5.5 && !opts.small) {
+      const heavy = opts.weaponId === 'charge' || opts.weaponId === 'artillery' || opts.weaponId === 'cannon';
+      for (const bd of g.world.buildings) {
+        if (!bd.destructible) continue;
+        const cx = Math.max(bd.x0, Math.min(x, bd.x1));
+        const cz = Math.max(bd.z0, Math.min(z, bd.z1));
+        const d = Math.hypot(cx - x, cz - z);
+        if (d > R * 0.8) continue;
+        const chance = (heavy ? 0.55 : 0.25) * (1 - d / (R * 0.8));
+        if (Math.random() < chance) g.war.damageBuilding(bd.id, opts.weaponId === 'charge' ? 2 : 1);
+      }
+    }
     // destructible mission targets
     for (const p of g.props) {
       if (p.kind !== PROP_KIND.TARGET || p.health <= 0) continue;

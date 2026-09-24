@@ -2,7 +2,8 @@
 // objective + compass, rank & squad, radio feed, and transient feedback.
 import { h, clear, esc } from './dom.js';
 import { insigniaSVG } from './insignia.js';
-import { rankOf } from '../../shared/config/ranks.js';
+import { rankOf, promotionOptions, clearanceRankName } from '../../shared/config/ranks.js';
+import { FACTION_INFO } from '../../shared/constants.js';
 import { WEAPONS, computeSpread } from '../../shared/config/weapons.js';
 import { MISSION_TYPES } from '../../shared/config/missions.js';
 import { ORDERS } from '../../shared/config/commands.js';
@@ -19,6 +20,8 @@ export class HUD {
     this.el.innerHTML = `
       <div class="hud-tl">
         <div class="rankbox"><span class="rk-ins"></span><div><div class="rk-name"></div><div class="rk-sub"></div></div></div>
+        <div class="promo-pill"></div>
+        <div class="locbox"></div>
         <div class="squadbox"></div>
       </div>
       <div class="hud-top">
@@ -56,7 +59,7 @@ export class HUD {
       <div class="fps"></div>`;
     const q = (s) => this.el.querySelector(s);
     this.$ = {
-      rkIns: q('.rk-ins'), rkName: q('.rk-name'), rkSub: q('.rk-sub'), squad: q('.squadbox'),
+      rkIns: q('.rk-ins'), rkName: q('.rk-name'), rkSub: q('.rk-sub'), squad: q('.squadbox'), promo: q('.promo-pill'), loc: q('.locbox'),
       strip: q('.compass-strip'), marks: q('.compass-marks'), objective: q('.objective'), eventBanner: q('.event-banner'),
       radio: q('.radio'), hp: q('.bar.hp i'), hpTxt: q('.bar.hp span'), ar: q('.bar.ar i'), st: q('.bar.st i'), status: q('.status'),
       wname: q('.wname'), mag: q('.ammo .mag'), res: q('.ammo .res'), slots: q('.slots'),
@@ -145,9 +148,21 @@ export class HUD {
     this.bannerT = performance.now() + 4200;
   }
 
-  promotion(rank) {
+  promotion(rank, kind, by) {
     const r = rankOf(rank);
-    this.banner(`PROMOTED: ${r.name.toUpperCase()}`, r.duty, 'promo', insigniaSVG(rank, 72));
+    const title = kind === 'commission' ? `COMMISSIONED: ${r.name.toUpperCase()}` : kind === 'warrant' ? `APPOINTED: ${r.name.toUpperCase()}` : kind === 'admin' ? `RANK SET: ${r.name.toUpperCase()}` : `PROMOTED: ${r.name.toUpperCase()}`;
+    this.banner(title, `${by ? `Presented by ${by}. ` : ''}${r.role.toUpperCase()} — ${r.duty}`, 'promo', insigniaSVG(rank, 72));
+    this.promoKey = '';
+  }
+
+  promotionReady(to, kind) {
+    const r = rankOf(to);
+    const what = kind === 'commission' ? 'Officer Candidate School' : kind === 'warrant' ? 'Warrant Officer appointment' : r.name;
+    this.banner('PROMOTION AVAILABLE', `${what}. Report to a friendly base or a senior officer.`, 'promo', insigniaSVG(to, 60));
+  }
+
+  restricted(name, level) {
+    this.toast(`RESTRICTED — ${name}: ${clearanceRankName(level)} only`, 'warn');
   }
 
   medal(id, tier) {
@@ -224,9 +239,34 @@ export class HUD {
     if (profile && profile.rank !== this.lastRank) {
       this.lastRank = profile.rank;
       this.$.rkIns.innerHTML = insigniaSVG(profile.rank, 34);
-      this.$.rkName.textContent = `${rankOf(profile.rank).abbr} ${profile.name}`;
+      this.$.rkName.textContent = `${rankOf(profile.rank).name} ${profile.name}`;
     }
-    if (profile) this.$.rkSub.textContent = `${me.role ? me.role.toUpperCase() : ''}`;
+    if (profile) this.$.rkSub.textContent = `${rankOf(profile.rank).role.toUpperCase()}${me.role ? ` · ${me.role.toUpperCase()}` : ''}`;
+    // promotion available: ready paths and where to receive it
+    if (profile && now - (this.promoCheck || 0) > 700) {
+      this.promoCheck = now;
+      const ready = promotionOptions(profile).filter((o) => o.met);
+      const key = ready.map((o) => o.to).join(',');
+      if (key !== this.promoKey) {
+        this.promoKey = key;
+        const o = ready[0];
+        this.$.promo.innerHTML = o ? `<b>PROMOTION AVAILABLE</b> ${esc(rankOf(o.to).abbr)}${ready.length > 1 ? ` +${ready.length - 1}` : ''} · ${app.input.touchMode ? 'Career tab' : '[U] at a base or talk to an officer'}` : '';
+        this.$.promo.classList.toggle('on', !!o);
+      }
+      // current location: place, region and who holds it
+      const pl = app.world.placeAt(me.s.x, me.s.z);
+      const war = store.get('war');
+      const terr = pl.territory && war ? war.territories.find((t) => t.id === pl.territory) : null;
+      const owner = terr ? FACTION_INFO[terr.owner] : null;
+      const inBase = Object.values(app.world.bases).find((b) => Math.hypot(b.x - me.s.x, b.z - me.s.z) < Math.max(b.rect[0], b.rect[1]));
+      const where = inBase ? inBase.name : pl.place || pl.region || 'Open country';
+      const locKey = `${where}|${pl.region}|${owner ? owner.short : ''}|${terr ? terr.state : ''}`;
+      if (locKey !== this.locKey) {
+        this.locKey = locKey;
+        const st = terr && terr.state !== 'controlled' ? ` · <span class="loc-st">${esc(terr.state.replace('_', ' ').toUpperCase())}</span>` : '';
+        this.$.loc.innerHTML = `<b>${esc(where)}</b>${pl.region && pl.region !== where ? ` · ${esc(pl.region)}` : ''}${owner ? ` <span class="loc-own" style="color:${owner.color}">${esc(owner.short)}</span>` : ''}${st}`;
+      }
+    }
     // squad
     const squads = store.get('squads') || [];
     const mine = squads.find((s) => s.id === store.get('mySquad'));

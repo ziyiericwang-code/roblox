@@ -309,6 +309,58 @@ export class Effects {
     for (let i = 0; i < 6; i++) this.add.emit(x, y, z, rnd(-2, 2), rnd(1, 4), rnd(-2, 2), rnd(0.2, 0.5), 0.08, 0.03, 1, 0.85, 0.5, 1, 0.5, 12);
   }
 
+  // Battles far away are seen, not simulated: smoke columns and flashes over
+  // every active battle, with detail by distance (near battles produce real
+  // effects from real combat events instead).
+  //   < 450 m  nothing extra   450-1500 m  columns + flashes
+  //   1500-3500 m  one slow column + rare flashes   beyond: nothing
+  updateBattles(battles, world, cam, dt) {
+    if (!this.battleFx) this.battleFx = new Map();
+    const seen = new Set();
+    for (const b of battles || []) {
+      const t = world.tById[b.t];
+      if (!t) continue;
+      seen.add(b.id);
+      let st = this.battleFx.get(b.id);
+      if (!st) {
+        st = { acc: 0, flash: rnd(0, 2), pts: t.sectors.map((s) => ({ x: s.x + rnd(-25, 25), z: s.z + rnd(-25, 25) })) };
+        this.battleFx.set(b.id, st);
+      }
+      const d = Math.hypot(t.x - cam.x, t.z - cam.z);
+      if (d < 450 || d > 3500) continue;
+      const far = d > 1500;
+      const inten = Math.max(0.2, b.int || 0.5);
+      st.acc += dt * inten * (far ? 0.8 : 2.5) * this.q.particles;
+      while (st.acc > 1) {
+        st.acc -= 1;
+        const p = far ? st.pts[0] : st.pts[Math.floor(Math.random() * st.pts.length)];
+        const y = this.groundAt ? this.groundAt(p.x, p.z) : 0;
+        const g = rnd(0.16, 0.26);
+        const sz = far ? 45 : 22;
+        this.smoke.emit(p.x + rnd(-6, 6), y + 4, p.z + rnd(-6, 6), rnd(0.5, 2), rnd(3, 6), rnd(-0.5, 0.5), rnd(14, 22), sz * 0.5, sz * 2.2, g, g * 0.97, g * 0.94, 0.55, 0.05, -0.15);
+      }
+      st.flash -= dt * inten;
+      if (st.flash <= 0) {
+        st.flash = far ? rnd(1.5, 4) : rnd(0.3, 1.4);
+        const p = st.pts[Math.floor(Math.random() * st.pts.length)];
+        const y = (this.groundAt ? this.groundAt(p.x, p.z) : 0) + 2;
+        const f = this.flashes.find((x) => x.t <= 0) || this.flashes[0];
+        f.s.position.set(p.x + rnd(-30, 30), y, p.z + rnd(-30, 30));
+        const sc = (far ? 26 : 14) * rnd(0.6, 1.2);
+        f.s.scale.set(sc, sc, sc);
+        f.s.visible = true;
+        f.t = 0.12;
+      }
+    }
+    for (const id of this.battleFx.keys()) if (!seen.has(id)) this.battleFx.delete(id);
+  }
+
+  // Recon drone circling a point (visual only).
+  drone(x, z, secs) {
+    this.drones = this.drones || [];
+    this.drones.push({ x, z, until: performance.now() / 1000 + secs });
+  }
+
   // ------------------------------------------------------------------ update
   update(dt, time, camera, weather) {
     this.add.uniforms.uScale.value = window.innerHeight * 0.9;

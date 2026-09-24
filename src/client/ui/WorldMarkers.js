@@ -89,12 +89,12 @@ export class WorldMarkers {
           ctx.fillStyle = 'rgba(10,12,14,0.55)';
           ctx.fill();
           ctx.lineWidth = 3;
-          ctx.strokeStyle = FCOL[s.owner];
+          ctx.strokeStyle = FCOL[s.o] || FCOL[0];
           ctx.stroke();
-          if (s.p !== 0 && Math.abs(s.p) < 100) {
+          if (s.p < 100) {
             ctx.beginPath();
             ctx.arc(p.x, p.y, r + 4, -Math.PI / 2, -Math.PI / 2 + (Math.abs(s.p) / 100) * Math.PI * 2);
-            ctx.strokeStyle = s.p > 0 ? FCOL[1] : FCOL[2];
+            ctx.strokeStyle = FCOL[s.o || s.c] || FCOL[0];
             ctx.lineWidth = 3;
             ctx.stroke();
           }

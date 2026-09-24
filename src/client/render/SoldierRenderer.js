@@ -6,7 +6,9 @@ import * as THREE from 'three';
 import { STANCE, LIFE, FACTION } from '../../shared/constants.js';
 import { WEAPONS } from '../../shared/config/weapons.js';
 import { WEAPON_CODES, EMOTE_CODES } from '../../shared/combat.js';
-import { CAMOS, DOMINION_CAMO } from '../../shared/config/cosmetics.js';
+import { CAMOS } from '../../shared/config/cosmetics.js';
+
+const NATIONAL_CAMO = { 1: 'woodland', 2: 'karsa', 3: 'seravia' };
 import { buildCamoMask } from './Textures.js';
 import { lerp, clamp } from '../../shared/math.js';
 
@@ -287,7 +289,7 @@ export class SoldierRenderer {
   camoColors(camo, faction) {
     const key = `${camo}:${faction}`;
     if (this.colors[key]) return this.colors[key];
-    const def = faction === FACTION.DOMINION ? DOMINION_CAMO : CAMOS[camo] || CAMOS.woodland;
+    const def = CAMOS[camo] || CAMOS[NATIONAL_CAMO[faction]] || CAMOS.woodland;
     const cols = def.colors.map((c) => linColor(c));
     this.colors[key] = cols;
     return cols;
@@ -369,8 +371,8 @@ export class SoldierRenderer {
   pose(e, info, st, dt, time, dist) {
     const faction = e.faction;
     const camo = this.camoColors(info ? info.camo : 'woodland', faction);
-    const gearCol = faction === FACTION.DOMINION ? tmpColor(0.09, 0.095, 0.1) : tmpColor(0.12, 0.13, 0.08);
-    const bandCol = faction === FACTION.DOMINION ? tmpColor2(0.6, 0.05, 0.04) : tmpColor2(0.08, 0.2, 0.6);
+    const gearCol = faction === FACTION.KARSA ? tmpColor(0.09, 0.095, 0.1) : faction === FACTION.SERAVIA ? tmpColor(0.16, 0.13, 0.08) : tmpColor(0.12, 0.13, 0.08);
+    const bandCol = faction === FACTION.KARSA ? tmpColor2(0.6, 0.05, 0.04) : faction === FACTION.SERAVIA ? tmpColor2(0.75, 0.5, 0.08) : tmpColor2(0.08, 0.2, 0.6);
     const skin = tmpColor3(st.skin * 0.95, st.skin * 0.72, st.skin * 0.58);
     // speed estimate from interpolated motion
     const sp = dt > 0 ? Math.hypot(e.x - st.px, e.z - st.pz) / dt : 0;

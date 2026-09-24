@@ -130,6 +130,7 @@ export class Builder {
     const p = { t: type, x, y: this.oy + ly, z, ...params };
     if (p.yaw !== undefined) p.yaw = this.yawWorld(p.yaw);
     else p.yaw = this.yawWorld(0);
+    if (this.cur) p.bid = this.cur.id;
     this.props.push(p);
     return p;
   }

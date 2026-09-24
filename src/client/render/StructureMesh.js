@@ -350,22 +350,66 @@ export class StructureMesh {
 
   buildChunk(k, wantSmall) {
     const world = this.world;
+    const D = world.destruction;
     const big = new ChunkBuilder();
     const small = wantSmall ? new ChunkBuilder() : null;
     const rand = mulberry32(k * 7 + 5);
+    const damaged = D && D.state.size > 0;
     for (const i of this.boxIdx.get(k) || []) {
       const b = world.boxes[i];
       if (b.dead) continue;
+      let box = b;
+      let dark = 1;
+      if (damaged && b.bid) {
+        const st = D.get(b.bid);
+        const fate = st ? D.fate(D.building.get(b.bid), i, st) : null;
+        if (fate) {
+          if (!fate.keep) {
+            rand();
+            continue;
+          }
+          if (fate.top !== null) box = { ...b, y1: Math.max(b.y0 + 0.05, fate.top) };
+          dark = fate.dark;
+        }
+      }
       const cx = (b.x0 + b.x1) / 2;
       const cz = (b.z0 + b.z1) / 2;
       const vol = (b.x1 - b.x0) * (b.y1 - b.y0) * (b.z1 - b.z0);
       const isSmall = (b.f & BF.SMALL) || vol < 1.5;
       if (isSmall && !small) continue;
       const ground = world.terrain.heightAt(cx, cz);
-      addBox(isSmall ? small : big, b, matColor(b.m, rand), matTile(b.m), matScale(b.m), b.y0 <= ground + 0.05);
+      let color = matColor(b.m, rand);
+      if (dark !== 1) color = color.map((c) => c * dark);
+      addBox(isSmall ? small : big, box, color, matTile(b.m), matScale(b.m), b.y0 <= ground + 0.05);
+    }
+    // rubble heaps for heavily damaged and destroyed buildings centred here
+    if (damaged) {
+      for (const [bid, st] of D.state) {
+        if (st < 2) continue;
+        const bd = D.building.get(bid);
+        if (!bd || this.chunkOf((bd.x0 + bd.x1) / 2, (bd.z0 + bd.z1) / 2) !== k) continue;
+        const rr = mulberry32(bid * 13 + st);
+        const n = st === 3 ? 9 : 4;
+        const rubbleColor = matColor(bd.m >= 0 ? bd.m : MAT.CONCRETE, rr).map((c) => c * 0.55);
+        for (let j = 0; j < n; j++) {
+          const x = bd.x0 + rr() * (bd.x1 - bd.x0);
+          const z = bd.z0 + rr() * (bd.z1 - bd.z0);
+          const w = 0.8 + rr() * 2.2;
+          const hgt = 0.3 + rr() * (st === 3 ? 1.3 : 0.6);
+          addBox(big, { x0: x - w / 2, y0: bd.y0 - 0.1, z0: z - w * 0.4, x1: x + w / 2, y1: bd.y0 + hgt, z1: z + w * 0.4 }, rubbleColor, matTile(MAT.CONCRETE), matScale(MAT.CONCRETE), true);
+        }
+      }
     }
     for (const i of this.propIdx.get(k) || []) {
       const p = world.props[i];
+      if (damaged && p.bid) {
+        const st = D.get(p.bid);
+        const bd = st ? D.building.get(p.bid) : null;
+        if (bd && ((st === 3 && p.y > bd.y0 + 1) || (st === 2 && p.y > bd.y0 + (bd.y1 - bd.y0) * 0.55))) {
+          rand();
+          continue;
+        }
+      }
       const color = matColor(p.m ?? MAT.CONCRETE, rand);
       const tile = matTile(p.m ?? MAT.CONCRETE);
       const scale = matScale(p.m ?? MAT.CONCRETE);
@@ -423,6 +467,39 @@ export class StructureMesh {
     this.built.delete(k);
     this.visData[k] = 0;
     this.visDirty = true;
+  }
+
+  // Building damage states from the server: apply to local collision (so
+  // movement prediction matches) and rebuild the affected chunks.
+  setBuildingStates(list, full) {
+    const D = this.world.destruction;
+    if (!D) return;
+    const touched = new Set();
+    if (full) {
+      for (const bid of [...D.state.keys()]) {
+        D.apply(bid, 0);
+        touched.add(bid);
+      }
+    }
+    for (const [bid, st] of list) {
+      D.apply(bid, st);
+      touched.add(bid);
+    }
+    const chunks = new Set();
+    for (const bid of touched) {
+      const bd = D.building.get(bid);
+      if (!bd) continue;
+      for (const [x, z] of [[bd.x0, bd.z0], [bd.x1, bd.z0], [bd.x0, bd.z1], [bd.x1, bd.z1], [(bd.x0 + bd.x1) / 2, (bd.z0 + bd.z1) / 2]]) chunks.add(this.chunkOf(x, z));
+    }
+    for (const k of chunks) {
+      const e = this.built.get(k);
+      if (!e) continue;
+      const small = !!e.small;
+      this.dropChunk(k, e);
+      this.built.set(k, this.buildChunk(k, small));
+      this.visData[k] = 1;
+      this.visDirty = true;
+    }
   }
 
   // Rebuild a chunk (used by destruction when building states change).

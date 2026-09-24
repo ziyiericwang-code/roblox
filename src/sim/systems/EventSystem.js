@@ -11,7 +11,7 @@ export class EventSystem {
   constructor(game) {
     this.game = game;
     this.rng = new Rng(9001);
-    this.nextAt = 90;
+    this.nextAt = 150;
     this.active = new Map();
     this.nextId = 1;
     this.version = 1;
@@ -93,7 +93,8 @@ export class EventSystem {
     const ok = (type, secs) => this.cooldownOk(F, type, secs);
     if (recent.length && ok('counterattack', 400)) opts.push({ w: 4, v: 'counterattack' });
     else if (front.length && ok('counterattack', 600)) opts.push({ w: 1.5, v: 'counterattack' });
-    if (front.length >= 2 && ok('base_invasion', 2400)) opts.push({ w: 0.6, v: 'base_invasion' });
+    // never in the first half hour of a world: new recruits train at the HQ
+    if (front.length >= 2 && g.time > 1800 && ok('base_invasion', 2400)) opts.push({ w: 0.6, v: 'base_invasion' });
     if (front.length && ok('supply_shortage', 700)) opts.push({ w: 1.5, v: 'supply_shortage' });
     if (front.length && ok('convoy', 600)) opts.push({ w: 1.5, v: 'convoy' });
     const rear = owned.filter((w) => !front.includes(w));

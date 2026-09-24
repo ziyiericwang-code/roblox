@@ -4,6 +4,7 @@
 //   terrain -> regions -> settlement pads -> roads & railways (A*) -> villages
 //   -> road/rail profiles -> bases, cities, towns, border posts, fortifications
 //   -> terrain materials -> forests & rocks -> colliders, cover, navigation
+import { Destruction } from './destruction.js';
 import { Rng, clamp, dist2D, hash2, smoothstep } from '../math.js';
 import { WORLD_HALF, WORLD_SEED, SEA_LEVEL, FACTION_INFO } from '../constants.js';
 import { TERRITORIES, HQ_BASES, HIGHWAYS, RAILWAYS, AIRPORTS, PLACE_NAMES, LAKES, RIVERS, ISLANDS } from '../config/world.js';
@@ -537,6 +538,7 @@ export function generateWorld(seed = WORLD_SEED, opts = {}) {
     timings: T,
     genMs: Date.now() - t0,
   };
+  world.destruction = new Destruction(world);
   world.territoryAt = (x, z) => regions.territoryAt(x, z);
   world.routeBetween = (fromId, toId) => roadRoute(world, fromId, toId);
   world.placeAt = (x, z) => placeAt(world, x, z);

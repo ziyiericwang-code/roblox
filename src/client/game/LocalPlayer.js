@@ -8,6 +8,7 @@ import { VEHICLES } from '../../shared/config/vehicles.js';
 import { stepCharacter, stepVehicle, eyeHeight, seatWorld } from '../../shared/physics.js';
 import { raySoldier, rayVehicle, pelletDirs, spreadDir, VEHICLE_CODES, WEAPON_CODES } from '../../shared/combat.js';
 import { MSG } from '../../shared/protocol.js';
+import { rankOf } from '../../shared/config/ranks.js';
 import { clamp, dirFromYawPitch, lerp, wrapAngle, yawFromDir, dist3 } from '../../shared/math.js';
 import { MAT_INFO } from '../../shared/world/materials.js';
 import { TMAT } from '../../shared/world/terrain.js';
@@ -250,9 +251,21 @@ export class LocalPlayer {
     // sub-step so slow frames cannot tunnel through thin walls
     const steps = Math.ceil(dt / 0.034);
     const inp = { fwd: mv.fwd, right: mv.right, sprint: this.sprint, jump, ads: this.ads, downed, carrying: this.carrying };
+    const clearance = rankOf(app.store.get('profile')?.rank || 0).clearance;
+    const bypass = !!app.adminBypass;
     for (let i = 0; i < steps; i++) {
+      const px = s.x;
+      const pz = s.z;
       stepCharacter(s, inp, dt / steps, app.world.colliders);
       inp.jump = false;
+      // restricted areas are solid for soldiers without the clearance
+      if (!bypass && app.access.blocking(s.x, s.y, s.z, clearance)) {
+        s.x = px;
+        s.z = pz;
+        s.vx = 0;
+        s.vz = 0;
+        this.restrictedAt = app.now;
+      }
     }
     if (s.grounded && prevVy < -13) this.landVel = prevVy;
     this.swimming = s.swimming;
@@ -328,9 +341,12 @@ export class LocalPlayer {
     // slot switching
     const slots = ['slot1', 'slot2', 'slot3', 'slot4', 'slot5'];
     let want = -1;
-    slots.forEach((a, i) => {
-      if (input.pressed(a) && this.weapons[i]) want = i;
-    });
+    // number keys answer an open conversation instead of switching weapons
+    if (!(app.dialog && app.dialog.open)) {
+      slots.forEach((a, i) => {
+        if (input.pressed(a) && this.weapons[i]) want = i;
+      });
+    }
     if (input.wheel) want = (this.slot + (input.wheel > 0 ? 1 : this.weapons.length - 1)) % Math.max(1, this.weapons.length);
     if (input.touch && input.touch.pressed('slot2')) want = (this.slot + 1) % Math.max(1, this.weapons.length);
     if (want >= 0 && want !== this.slot && !downed) {
@@ -507,6 +523,7 @@ export class LocalPlayer {
       if (it.type === 'enter') app.send({ t: MSG.VEHICLE, a: 'enter', id: it.id });
       else if (it.type === 'load' || it.type === 'unload' || it.type === 'drop') app.send({ t: MSG.ACTION, a: 'start', type: it.type, target: it.id || 0 });
       else if (it.type === 'board') app.menu.open('missions');
+      else if (it.type === 'talk') app.send({ t: MSG.TALK, id: it.id });
       else if (it.type === 'armory') app.send({ t: MSG.RETURN });
       else {
         app.send({ t: MSG.ACTION, a: 'start', type: it.type, target: it.id });
@@ -551,6 +568,11 @@ export class LocalPlayer {
         if (st.life === LIFE.DOWNED) consider('revive', e.id, st.x, st.y, st.z, 2.6, `Revive ${name}`);
         else if (st.captive) consider('rescue', e.id, st.x, st.y, st.z, 2.6, `Free ${name}`);
         else if (hasMedkit && st.life === LIFE.ALIVE && st.health < 95 && !st.ambient) consider('heal', e.id, st.x, st.y, st.z, 3, `Heal ${name}`);
+        else if (st.life === LIFE.ALIVE && !st.isPlayer) {
+          // conversation with NPCs (staff are more interesting: slightly preferred)
+          const who = `${rankOf(st.rank).abbr} ${name}`;
+          consider('talk', e.id, st.x, st.y, st.z, info.st ? 3.2 : 2.4, info.ti ? `Talk to ${who} · ${info.ti}` : `Talk to ${who}`, false);
+        }
       } else if (e.k === ENTITY.VEHICLE) {
         const def = VEHICLES[VEHICLE_CODES[st.type]];
         if (!def || (st.state & 7) === 3) continue;

@@ -1,13 +1,13 @@
 // In-game menu: Map, Missions, Squad, Career, Quartermaster, Command, Settings.
 import { h, clear, esc, fmtNum } from './dom.js';
 import { insigniaSVG, ribbonSVG } from './insignia.js';
-import { RANKS, rankOf, promotionStatus, REQ_LABELS, MAX_RANK, SCOPE_NAMES, RANK } from '../../shared/config/ranks.js';
+import { RANKS, rankOf, promotionOptions, REQ_LABELS, SCOPE_NAMES, RANK, TRACK_NAMES, TRACK_RANGE, CLEARANCE_NAMES } from '../../shared/config/ranks.js';
 import { MEDALS, MEDAL_TIERS } from '../../shared/config/medals.js';
 import { MISSION_TYPES, DIFFICULTY_NAMES } from '../../shared/config/missions.js';
-import { ABILITIES } from '../../shared/config/commands.js';
+import { ABILITIES, ORDERS, canUseAbility, abilityRankLabel } from '../../shared/config/commands.js';
 import { COSMETIC_TABLES, CAMOS } from '../../shared/config/cosmetics.js';
 import { ROLES } from '../../shared/config/roles.js';
-import { FACTION_INFO, FACTION } from '../../shared/constants.js';
+import { FACTION_INFO, WORLD_HALF, areHostile } from '../../shared/constants.js';
 import { formatTime, formatDuration } from '../../shared/math.js';
 import { MSG } from '../../shared/protocol.js';
 import { QUALITY } from '../render/Renderer.js';
@@ -64,8 +64,9 @@ export class Menu {
     app.input.enabled = false;
     app.input.releaseLock();
     for (const b of this.tabsEl.children) b.classList.toggle('on', b.dataset.tab === this.tab);
-    const officer = (app.store.get('profile') || {}).rank >= RANK.SERGEANT;
-    this.tabsEl.querySelector('[data-tab="command"]').style.display = officer ? '' : 'none';
+    const rk = (app.store.get('profile') || {}).rank || 0;
+    const commands = rankOf(rk).orders.length || rankOf(rk).map || Object.values(ABILITIES).some((ab) => canUseAbility(rk, ab));
+    this.tabsEl.querySelector('[data-tab="command"]').style.display = commands ? '' : 'none';
     this.render();
     app.audio.uiClick();
   }
@@ -134,14 +135,14 @@ export class Menu {
     let drag = null;
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
-      mv.view.zoom = Math.max(1, Math.min(6, mv.view.zoom * (e.deltaY < 0 ? 1.15 : 0.87)));
+      mv.view.zoom = Math.max(1, Math.min(14, mv.view.zoom * (e.deltaY < 0 ? 1.15 : 0.87)));
     }, { passive: false });
     c.addEventListener('pointerdown', (e) => {
       drag = { x: e.clientX, y: e.clientY, cx: mv.view.cx, cz: mv.view.cz, moved: false };
     });
     c.addEventListener('pointermove', (e) => {
       if (!drag) return;
-      const S = Math.min(c.width, c.height) / 1600 * mv.view.zoom;
+      const S = (Math.min(c.width, c.height) / (WORLD_HALF * 2)) * mv.view.zoom;
       if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) drag.moved = true;
       mv.view.cx = drag.cx - (e.clientX - drag.x) / S;
       mv.view.cz = drag.cz - (e.clientY - drag.y) / S;
@@ -160,6 +161,13 @@ export class Menu {
         this.close();
         return;
       }
+      if (this.pendingMove && hit.type === 'territory') {
+        this.app.send({ t: MSG.MAPCMD, cmd: 'move', from: this.pendingMove, target: hit.id });
+        this.pendingMove = null;
+        this.selectedTerritory = hit.id;
+        this.renderMapInfo();
+        return;
+      }
       if (hit.type === 'territory') this.selectedTerritory = hit.id;
       this.renderMapInfo();
     });
@@ -172,7 +180,7 @@ export class Menu {
     const s = app.store;
     const me = app.player;
     app.mapView.draw(this.mapCanvas, {
-      war: s.get('war'), missions: s.get('missions'), tracked: s.get('tracked'), squadPos: s.get('squadPos'),
+      war: s.get('war'), faction: s.get('faction'), missions: s.get('missions'), tracked: s.get('tracked'), squadPos: s.get('squadPos'),
       me: me.alive ? { id: me.id, x: me.s.x, z: me.s.z, yaw: me.yaw } : null,
       selected: this.selectedTerritory, order: this.myOrder(),
     });
@@ -190,32 +198,66 @@ export class Menu {
     clear(el);
     const app = this.app;
     const war = app.store.get('war');
+    const f = app.store.get('faction');
+    const p = app.store.get('profile') || { rank: 0 };
+    const rk = rankOf(p.rank);
     if (this.pendingAbility) {
       el.appendChild(h('div', { class: 'mi-h' }, `Select a target for ${ABILITIES[this.pendingAbility].name}`));
       return;
     }
-    const id = this.selectedTerritory;
-    if (war) {
-      el.appendChild(h('div', { class: 'mi-h' }, `Campaign ${war.campaign}`));
-      const cp = war.cp || {};
-      el.appendChild(h('div', { class: 'mi-row' }, `Command Points: ${cp[1] ?? 0}`));
-    }
-    if (!id || !war) {
-      el.appendChild(h('p', { class: 'dimmed' }, 'Click a territory for details. Scroll to zoom, drag to pan.'));
+    if (this.pendingMove) {
+      el.appendChild(h('div', { class: 'mi-h' }, `MOVE from ${app.world.tById[this.pendingMove]?.name || 'HQ'}: click the destination`));
+      el.appendChild(h('button', { class: 'btn tiny sec', onclick: () => { this.pendingMove = null; this.renderMapInfo(); } }, 'Cancel'));
       return;
     }
-    const t = app.world.tById[id];
-    const w = war.territories.find((q) => q.id === id);
-    el.appendChild(h('div', { class: 'mi-h' }, t.name));
-    el.appendChild(h('p', { class: 'dimmed' }, t.blurb));
-    el.appendChild(h('div', { class: 'mi-row' }, `Held by: `, h('b', { style: { color: FACTION_INFO[w.owner].color } }, FACTION_INFO[w.owner].name)));
-    el.appendChild(h('div', { class: 'mi-row' }, `Status: ${STATE_LABEL[w.state] || w.state}`));
-    if (!t.isBase) el.appendChild(h('div', { class: 'mi-row' }, `Supply: `, h('span', { class: 'meter' }, h('i', { style: { width: `${w.supply}%` } })), ` ${w.supply}%`));
-    for (const s of w.sectors) {
-      const sd = t.sectors.find((q) => q.id === s.id);
-      el.appendChild(h('div', { class: 'mi-sector' }, h('b', { style: { color: FACTION_INFO[s.owner].color } }, s.id), ` ${sd.name} `, s.c ? h('span', { class: 'tag' }, 'CONTESTED') : ''));
+    if (war) {
+      el.appendChild(h('div', { class: 'mi-h' }, `The war · campaign ${war.campaign}`));
+      for (const [a, b2, mins] of war.wars) el.appendChild(h('div', { class: 'mi-row' }, h('b', { style: { color: FACTION_INFO[a].color } }, FACTION_INFO[a].short), ' vs ', h('b', { style: { color: FACTION_INFO[b2].color } }, FACTION_INFO[b2].short), h('span', { class: 'dimmed' }, ` · ${mins} min`)));
+      if (!war.wars.length) el.appendChild(h('div', { class: 'mi-row' }, 'No wars — an uneasy peace.'));
+      el.appendChild(h('div', { class: 'mi-row dimmed' }, `Army strength (est.): ${Object.entries(war.strength || {}).map(([k, v]) => `${FACTION_INFO[k].short} ${v}`).join(' · ')}`));
+      el.appendChild(h('div', { class: 'mi-row dimmed' }, `Command Points ${war.cp[f] ?? 0} · national reserve ${war.reserve}`));
+      if (rk.map >= 3) {
+        el.appendChild(h('div', { class: 'row' },
+          h('button', { class: 'btn tiny', onclick: () => app.send({ t: MSG.MAPCMD, cmd: 'general_offensive' }) }, 'GENERAL OFFENSIVE'),
+          h('button', { class: 'btn tiny sec', onclick: () => app.send({ t: MSG.MAPCMD, cmd: 'mobilize' }) }, 'MOBILIZE RESERVE')));
+      }
     }
-    if (w.battle) el.appendChild(h('div', { class: 'mi-row warn' }, `⚔ Battle in progress — ${FACTION_INFO[w.battle].short} attacking`));
+    const id = this.selectedTerritory;
+    if (!id || !war) {
+      el.appendChild(h('p', { class: 'dimmed' }, rk.map ? 'Click a territory to give strategic orders. Scroll to zoom, drag to pan.' : 'Click a territory for details. Scroll to zoom, drag to pan.'));
+      return;
+    }
+    const t = app.world.tById[id] || app.world.hqs.find((x) => x.id === id);
+    const w = war.territories.find((q) => q.id === id);
+    if (!t || !w) return;
+    el.appendChild(h('div', { class: 'mi-h' }, t.name));
+    if (t.blurb) el.appendChild(h('p', { class: 'dimmed' }, t.blurb));
+    el.appendChild(h('div', { class: 'mi-row' }, 'Held by: ', h('b', { style: { color: FACTION_INFO[w.owner].color } }, FACTION_INFO[w.owner].name)));
+    if (!id.startsWith('hq_')) {
+      el.appendChild(h('div', { class: 'mi-row' }, `Status: ${STATE_LABEL[w.state] || w.state}`));
+      el.appendChild(h('div', { class: 'mi-row' }, 'Supply: ', h('span', { class: 'meter' }, h('i', { style: { width: `${w.supply}%` } })), ` ${w.supply}%`));
+      if (w.str >= 0) el.appendChild(h('div', { class: 'mi-row' }, `Garrison: ${w.owner === f ? '' : '~'}${w.str} soldiers`));
+      for (const sc of w.sectors) {
+        const sd = t.sectors.find((q) => q.id === sc.id);
+        el.appendChild(h('div', { class: 'mi-sector' }, h('b', { style: { color: FACTION_INFO[sc.o]?.color || '#aaa' } }, sc.id), ` ${sd ? sd.name : ''} `, sc.x ? h('span', { class: 'tag' }, 'CONTESTED') : sc.p < 100 ? h('span', { class: 'tag' }, `${sc.p}%`) : ''));
+      }
+      const b = war.battles.find((x) => x.t === id);
+      if (b) el.appendChild(h('div', { class: 'mi-row warn' }, `⚔ Battle: ${FACTION_INFO[b.a].short} ${b.as} vs ${FACTION_INFO[b.d].short} ${b.ds}${b.live ? ' · soldiers on the ground' : ''}`));
+    }
+    // strategic orders (Colonel: own region, Generals: anywhere)
+    if (rk.map && !id.startsWith('hq_')) {
+      const row = h('div', { class: 'row map-cmds' });
+      const send = (cmd) => app.send({ t: MSG.MAPCMD, cmd, target: id });
+      const hostile = areHostile(w.owner, f);
+      if (hostile) row.appendChild(h('button', { class: 'btn tiny', onclick: () => send('attack') }, 'ATTACK'));
+      if (w.owner === f) {
+        row.appendChild(h('button', { class: 'btn tiny', onclick: () => send('defend') }, 'DEFEND'));
+        row.appendChild(h('button', { class: 'btn tiny', onclick: () => send('reinforce') }, 'REINFORCE'));
+        row.appendChild(h('button', { class: 'btn tiny sec', onclick: () => { this.pendingMove = id; this.renderMapInfo(); } }, 'MOVE FROM HERE…'));
+      }
+      el.appendChild(h('div', { class: 'mi-h small' }, rk.map === 1 ? 'Regional command (within 1.5 km of you)' : 'Strategic command'));
+      el.appendChild(row);
+    }
   }
 
   // ------------------------------------------------------------------ missions
@@ -339,14 +381,15 @@ export class Menu {
     const p = app.store.get('profile');
     if (!p) return;
     const r = rankOf(p.rank);
-    const st = promotionStatus(p);
+    const f = app.store.get('faction');
     const head = h('div', { class: 'career-head' },
       h('div', { class: 'big-ins', html: insigniaSVG(p.rank, 96) }),
       h('div', {},
-        h('div', { class: 'ch-rank' }, r.name.toUpperCase()),
-        h('div', { class: 'ch-name' }, p.name),
+        h('div', { class: 'ch-rank' }, `${r.name.toUpperCase()} · ${r.grade}`),
+        h('div', { class: 'ch-name' }, `${p.name}${f ? ` — ${FACTION_INFO[f].army}` : ''}`),
+        h('div', { class: 'ch-role' }, r.role.toUpperCase()),
         h('div', { class: 'ch-duty' }, r.duty),
-        h('div', { class: 'ch-stats' }, `${fmtNum(p.xp)} XP · ${fmtNum(p.credits)} credits · Rating ${p.rating} · ${formatDuration(p.stats.service || 0)} service`),
+        h('div', { class: 'ch-stats' }, `${fmtNum(p.xp)} XP · ${formatDuration(p.stats.service || 0)} service · Rating ${p.rating} · ${TRACK_NAMES[r.track]}`),
       ));
     b.appendChild(head);
     const cols = h('div', { class: 'cols' });
@@ -354,31 +397,54 @@ export class Menu {
     const right = h('div', { class: 'col' });
     cols.append(left, right);
     b.appendChild(cols);
-    // promotion
-    if (!st.maxed) {
-      const next = RANKS[st.next];
-      left.appendChild(h('h3', {}, `Next: ${next.name}`));
-      left.appendChild(h('p', { class: 'dimmed' }, next.duty));
-      for (const it of st.items) {
+    // what this rank can do
+    const orders = r.orders.map((o) => ORDERS[o].name.toUpperCase());
+    const abilities = Object.values(ABILITIES).filter((ab) => canUseAbility(p.rank, ab)).map((ab) => ab.name);
+    left.appendChild(h('h3', {}, 'At your rank'));
+    left.appendChild(h('div', { class: 'can' },
+      h('div', {}, h('b', {}, 'Orders: '), orders.length ? `${orders.join(', ')} (${SCOPE_NAMES[r.scope].toLowerCase()} scope)` : 'none — you follow orders'),
+      h('div', {}, h('b', {}, 'Access: '), `${CLEARANCE_NAMES[r.clearance]} areas`),
+      r.map ? h('div', {}, h('b', {}, 'Strategy: '), r.map >= 3 ? 'supreme command from the war map' : r.map === 2 ? 'ATTACK / DEFEND / MOVE / REINFORCE anywhere from the war map' : 'regional orders from the war map') : null,
+      abilities.length ? h('div', {}, h('b', {}, 'Abilities: '), abilities.join(', ')) : null,
+      r.npcFollowers ? h('div', {}, h('b', {}, 'Attached soldiers: '), String(r.npcFollowers)) : null));
+    // promotion paths
+    const opts = promotionOptions(p);
+    if (!opts.length) left.appendChild(h('h3', {}, 'You hold the highest rank of your career.'));
+    for (const o of opts) {
+      const next = RANKS[o.to];
+      const title = o.kind === 'commission' ? `Officer Candidate School → ${next.name}` : o.kind === 'warrant' ? `Warrant Officer → ${next.name}` : `Next: ${next.name}`;
+      left.appendChild(h('h3', { class: o.met ? 'ready' : '' }, h('span', { html: insigniaSVG(o.to, 24) }), ` ${title}`));
+      left.appendChild(h('p', { class: 'dimmed' }, `${next.role}. ${next.duty}`));
+      for (const it of o.items) {
         const frac = Math.min(1, it.have / Math.max(1, it.need));
         left.appendChild(h('div', { class: `req${it.met ? ' met' : ''}` },
           h('span', { class: 'req-l' }, REQ_LABELS[it.key] || it.key),
           h('span', { class: 'meter' }, h('i', { style: { width: `${frac * 100}%` } })),
           h('span', { class: 'req-v' }, it.key === 'training' ? (it.met ? 'Done' : 'Required') : `${fmtNum(it.have)} / ${fmtNum(it.need)}`)));
       }
-    } else left.appendChild(h('h3', {}, 'You have reached the highest rank in the army.'));
-    // ladder
-    const ladder = h('div', { class: 'ladder' });
-    RANKS.forEach((rk, i) => ladder.appendChild(h('div', { class: `lr${i === p.rank ? ' cur' : ''}${i < p.rank ? ' past' : ''}`, title: `${rk.name}: ${rk.duty}` }, h('span', { html: insigniaSVG(i, 22) }), h('span', {}, rk.abbr))));
-    left.appendChild(h('h4', {}, 'Rank ladder'));
-    left.appendChild(ladder);
+      if (o.met) {
+        left.appendChild(h('div', { class: 'promo-ready' }, h('b', {}, 'PROMOTION AVAILABLE'), ' Report to any friendly base or a senior officer, then accept.',
+          h('button', { class: 'btn', onclick: () => app.requestPromotion(o.to) }, o.kind === 'promotion' ? 'Accept promotion' : 'Apply')));
+      }
+    }
+    // ladder by track
+    left.appendChild(h('h4', {}, 'The hierarchy'));
+    for (const tr of ['E', 'W', 'O']) {
+      const [a, z] = TRACK_RANGE[tr];
+      const ladder = h('div', { class: 'ladder' }, h('div', { class: 'lt' }, TRACK_NAMES[tr]));
+      for (let i = a; i <= z; i++) {
+        const rk = RANKS[i];
+        ladder.appendChild(h('div', { class: `lr${i === p.rank ? ' cur' : ''}${i < p.rank && rk.track === r.track ? ' past' : ''}`, title: `${rk.name} (${rk.role}): ${rk.duty}` }, h('span', { html: insigniaSVG(i, 22) }), h('span', {}, rk.abbr)));
+      }
+      left.appendChild(ladder);
+    }
     // stats
     const S = p.stats;
     const statRows = [
       ['Missions completed', S.missions], ['Objectives taken', S.captures], ['Objectives defended', S.defends], ['Territories taken', S.territories],
-      ['Battles fought', S.battles], ['Operations', S.operations], ['Leadership', S.leadership], ['Orders issued', S.ordersIssued],
-      ['Revives', S.revives], ['Resupplies', S.resupplies], ['Enemies neutralised', S.kills], ['Times wounded', S.revived], ['KIA', S.deaths],
-      ['Spotted', S.spots], ['Supplies delivered', S.supplies], ['Vehicles destroyed', S.vehicleKills], ['Range best', `${S.rangeBest || 0}/10`], ['Campaigns won', S.campaigns],
+      ['Battles fought', S.battles], ['Battles won / operations', S.operations], ['Leadership', S.leadership], ['Orders issued', S.ordersIssued],
+      ['Revives', S.revives], ['Resupplies', S.resupplies], ['Minutes crewing vehicles', S.crew], ['Enemies neutralised', S.kills], ['KIA', S.deaths],
+      ['Supplies delivered', S.supplies], ['Vehicles destroyed', S.vehicleKills], ['Promotions', S.promotions], ['Range best', `${S.rangeBest || 0}/10`], ['Campaigns won', S.campaigns],
     ];
     const grid = h('div', { class: 'statgrid' });
     for (const [k, v] of statRows) grid.appendChild(h('div', { class: 'stat' }, h('span', {}, k), h('b', {}, typeof v === 'number' ? fmtNum(v) : v || 0)));
@@ -416,6 +482,7 @@ export class Menu {
       b.appendChild(h('h4', {}, label));
       const row = h('div', { class: 'store-row' });
       for (const item of Object.values(COSMETIC_TABLES[cat])) {
+        if (item.national) continue;
         const owned = (p.unlocks[cat] || []).includes(item.id);
         const equipped = p.cosmetics[cat] === item.id;
         const locked = (item.minRank || 0) > p.rank;
@@ -439,16 +506,16 @@ export class Menu {
     const cmd = app.store.get('cmd') || {};
     const r = rankOf(p.rank);
     b.appendChild(h('div', { class: 'store-head' }, h('h3', {}, 'Command'), h('span', { class: 'credits' }, `Command Points ${cmd.cp ?? 0} / ${cmd.cpMax ?? 100}`)));
-    b.appendChild(h('p', { class: 'dimmed' }, `Order scope: ${SCOPE_NAMES[r.scope]} — ${r.duty} Command Points are shared by the whole army and regenerate with territory held and supplies delivered.`));
+    b.appendChild(h('p', { class: 'dimmed' }, `${r.role}. Orders: ${r.orders.length ? r.orders.map((o) => ORDERS[o].name).join(', ') : 'none'} · scope ${SCOPE_NAMES[r.scope]}. Command Points are shared by the whole army and regenerate with territory held and supplies delivered.${r.map ? ' Strategic orders are given from the Map tab.' : ''}`));
     if (cmd.offensive) b.appendChild(h('div', { class: 'mi-row warn' }, `Major offensive on ${app.world.tById[cmd.offensive.territory].name} (by ${cmd.offensive.by})`));
     if (cmd.priority) b.appendChild(h('div', { class: 'mi-row' }, `Strategic priority: ${app.world.tById[cmd.priority.territory].name} (set by ${cmd.priority.by})`));
     const grid = h('div', { class: 'abilities' });
     for (const ab of Object.values(ABILITIES)) {
-      const locked = p.rank < ab.minRank;
+      const locked = !canUseAbility(p.rank, ab);
       const cd = (cmd.ready || {})[ab.id];
       const card = h('div', { class: `ab${locked ? ' locked' : ''}` },
         h('b', {}, ab.name), h('div', { class: 'dimmed' }, ab.desc),
-        h('div', { class: 'ab-meta' }, `${rankOf(ab.minRank).abbr}+ · ${ab.cp} CP · ${ab.cooldown}s cooldown`),
+        h('div', { class: 'ab-meta' }, `${abilityRankLabel(ab)} · ${ab.cp} CP · ${ab.cooldown}s cooldown`),
         locked ? h('span', { class: 'tag' }, 'Locked') : cd ? h('span', { class: 'tag' }, `Ready in ${cd}s`) :
           h('button', { class: 'btn tiny', onclick: () => this.useAbility(ab) }, ab.needsTerritory || ab.needsPos ? 'Select target' : 'Use'));
       grid.appendChild(card);
@@ -552,4 +619,3 @@ const KEYS_HTML = `
 <div><b>M</b> map · <b>J</b> missions · <b>P</b> squad · <b>Tab</b> menu · <b>K</b> first/third person</div>
 <div>Vehicles: <b>WASD</b> drive · <b>Space/C</b> climb/descend · mouse aim · <b>1-5</b> change seat · <b>F</b> exit</div>`;
 
-export { FACTION };

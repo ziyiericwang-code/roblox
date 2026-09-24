@@ -365,3 +365,48 @@ body.touch-mode .tb-skip { margin-top: 3px; padding: 4px 0; }
   .hud-top { width: 86vw; }
   .objective { font-size: 13px; }
 }
+
+/* ---------------- world v2: enlistment, conversations, sandbox, HUD additions */
+.country-select { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(20,26,30,.92), rgba(6,8,10,.97)); overflow: auto; transition: opacity .4s; }
+.country-select.off { opacity: 0; pointer-events: none; }
+.cs-box { max-width: 1100px; padding: 24px; text-align: center; }
+.cs-kicker { letter-spacing: .3em; font-size: 12px; color: #c9b27a; }
+.cs-box h2 { margin: 6px 0 4px; font-size: 28px; }
+.cs-cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-top: 18px; }
+.cs-card { width: 320px; text-align: left; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-top: 4px solid var(--c); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.cs-card .cs-flag { height: 38px; border-radius: 3px; background: linear-gradient(90deg, var(--d) 0 33%, var(--c) 33% 66%, var(--d) 66%); }
+.cs-name { font-size: 19px; font-weight: 700; }
+.cs-motto { font-style: italic; color: #cfc6ae; font-size: 13px; }
+.cs-card p { font-size: 13px; color: #c4cbd1; margin: 0; }
+.cs-card ul { margin: 0; padding-left: 18px; font-size: 13px; color: #aeb7be; }
+.cs-war { font-size: 12px; font-weight: 700; color: #ff9a7a; letter-spacing: .05em; margin-top: auto; }
+.cs-card .btn { margin-top: 8px; }
+.dialog { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%); width: min(560px, 92vw); background: rgba(12,16,19,.9); border: 1px solid rgba(255,255,255,.15); border-radius: 6px; padding: 12px 14px; display: none; z-index: 30; pointer-events: auto; }
+.dialog.on { display: block; }
+.dg-head { display: flex; gap: 10px; align-items: center; }
+.dg-name { font-weight: 700; }
+.dg-title { font-size: 12px; color: #c9b27a; }
+.dg-text { margin: 8px 0; line-height: 1.4; color: #e8e4d8; }
+.dg-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sandbox { position: absolute; right: 12px; top: 60px; width: 380px; max-height: 80vh; overflow: auto; background: rgba(10,14,16,.94); border: 1px solid #c9a44a; border-radius: 6px; padding: 10px; display: none; z-index: 40; pointer-events: auto; font-size: 12px; }
+.sandbox.on { display: block; }
+.sb-h { display: flex; justify-content: space-between; font-weight: 700; color: #e8c86a; margin-bottom: 6px; }
+.sb-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+.sb-l { width: 62px; color: #aeb7be; }
+.sandbox select, .sandbox input[type=range] { max-width: 150px; background: #1a2024; color: #eee; border: 1px solid #333; }
+.perfmon { position: absolute; left: 12px; bottom: 120px; font: 11px/1.45 ui-monospace, monospace; background: rgba(0,0,0,.72); color: #cfe; padding: 6px 8px; border-radius: 4px; display: none; z-index: 35; }
+.perfmon.on { display: block; }
+.promo-pill { display: none; margin-top: 4px; font-size: 12px; background: rgba(214,178,94,.18); border: 1px solid #d6b25e; color: #f3dfa6; padding: 3px 8px; border-radius: 3px; }
+.promo-pill.on { display: inline-block; animation: pillpulse 2s infinite; }
+@keyframes pillpulse { 50% { background: rgba(214,178,94,.38); } }
+.locbox { margin-top: 4px; font-size: 12px; color: #d8dde0; text-shadow: 0 1px 2px #000; }
+.loc-st { color: #ff9a7a; font-weight: 700; }
+.tt-sandbox { margin-top: 6px; }
+.cw-opt.off { opacity: .3; }
+.career-head .ch-role { color: #e8c86a; font-weight: 700; letter-spacing: .08em; font-size: 13px; }
+.can { font-size: 13px; line-height: 1.6; background: rgba(255,255,255,.04); padding: 8px 10px; border-radius: 4px; }
+.promo-ready { margin: 8px 0 14px; padding: 8px; border: 1px solid #d6b25e; border-radius: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+h3.ready { color: #f3dfa6; }
+.ladder .lt { width: 100%; font-size: 11px; color: #aeb7be; letter-spacing: .1em; text-transform: uppercase; margin-top: 4px; }
+.map-cmds .btn { font-weight: 700; }
+.mi-h.small { font-size: 12px; margin-top: 8px; }

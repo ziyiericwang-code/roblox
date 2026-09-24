@@ -29,6 +29,10 @@ export class DeploySystem {
     const f = session.faction;
     const out = [];
     const base = g.world.bases[f];
+    if (!base) {
+      if (f) g.log.warn('deploy options: invalid faction', f, typeof f);
+      return out;
+    }
     if (!session.profile.trainingComplete && !session.profile.trainingSkipped) {
       out.push({ id: 'training', type: 'base', name: `Basic Training — ${base.name}`, x: base.x, z: base.z, ok: true });
       return out;
@@ -197,7 +201,7 @@ export class DeploySystem {
       faction: f, name: session.name, rank: p.rank, role: roleId, player: session, squadId: session.squadId,
       x: pos.x, y: y + 0.05, z: pos.z, yaw, weapons: lo.weapons, armor: lo.armor,
       grenadeBonus: ROLES[roleId].perks.grenades ? ROLES[roleId].perks.grenades - 2 : 0,
-      camo: p.cosmetics.camo, headgear: p.cosmetics.headgear,
+      camo: p.cosmetics.camo === 'woodland' ? ({ 1: 'woodland', 2: 'karsa', 3: 'seravia' }[f] || 'woodland') : p.cosmetics.camo, headgear: p.cosmetics.headgear,
     });
     s.invulnerableUntil = g.time + 3;
     session.soldier = s;
@@ -225,7 +229,7 @@ export class DeploySystem {
     if (this.timer < 2) return;
     this.timer = 0;
     for (const s of this.game.sessions) {
-      if (s.profile && (!s.soldier || s.soldier.life === LIFE.DEAD)) this.sendOptions(s);
+      if (s.profile && s.faction && (!s.soldier || s.soldier.life === LIFE.DEAD)) this.sendOptions(s);
     }
   }
 }

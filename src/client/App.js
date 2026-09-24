@@ -2,19 +2,17 @@
 // routes network messages, runs the frame loop and ties rendering, audio,
 // input and UI together.
 import * as THREE from 'three';
-import { WORLD_SEED, ENTITY, LIFE, FACTION, STANCE, SEA_LEVEL } from '../shared/constants.js';
+import { WORLD_SEED, ENTITY, LIFE, FACTION, STANCE, SEA_LEVEL, FACTION_INFO, setWars, areHostile } from '../shared/constants.js';
 import { generateWorld } from '../shared/world/layout.js';
 import { MSG } from '../shared/protocol.js';
 import { WEAPONS } from '../shared/config/weapons.js';
 import { WEAPON_CODES, raySoldier, rayVehicle, VEHICLE_CODES } from '../shared/combat.js';
 import { VEHICLES } from '../shared/config/vehicles.js';
-import { rankOf } from '../shared/config/ranks.js';
+import { rankOf, addressOf, promotionOptions } from '../shared/config/ranks.js';
+import { AccessIndex } from '../shared/world/access.js';
 import { dirFromYawPitch, rayPointDist } from '../shared/math.js';
 import { Renderer } from './render/Renderer.js';
-import { buildAtlas, buildTerrainDetail } from './render/Textures.js';
-import { buildTerrain, buildWater, buildRoads } from './render/TerrainMesh.js';
-import { StructureMesh } from './render/StructureMesh.js';
-import { Vegetation } from './render/Vegetation.js';
+import { WorldScene } from './render/WorldScene.js';
 import { SoldierRenderer } from './render/SoldierRenderer.js';
 import { VehicleRenderer } from './render/VehicleRenderer.js';
 import { PropRenderer } from './render/PropRenderer.js';
@@ -33,6 +31,9 @@ import { DeployScreen } from './ui/Deploy.js';
 import { CommandWheel } from './ui/CommandWheel.js';
 import { TitleScreen } from './ui/Title.js';
 import { MapView } from './ui/MapView.js';
+import { CountrySelect } from './ui/CountrySelect.js';
+import { Dialog } from './ui/Dialog.js';
+import { Sandbox } from './ui/Sandbox.js';
 import { h } from './ui/dom.js';
 
 const SETTINGS_KEY = 'frontline.settings';
@@ -143,14 +144,14 @@ export class App {
     this.mode = mode;
     try {
       await this.loading('Surveying the theatre of war…');
-      this.world = generateWorld(WORLD_SEED, { nav: mode === 'solo' });
+      this.world = generateWorld(WORLD_SEED, { nav: mode !== 'mp' });
       await this.loading('Building terrain, towns and fortifications…');
       this.initScene(quality);
       await this.loading('Briefing the troops…');
       this.initUI();
-      await this.loading(mode === 'solo' ? 'Starting the campaign…' : 'Connecting to the front…');
-      if (mode === 'solo') {
-        const { transport, game } = await startSolo(this.world);
+      await this.loading(mode !== 'mp' ? 'Starting the war…' : 'Connecting to the front…');
+      if (mode === 'solo' || mode === 'sandbox') {
+        const { transport, game } = await startSolo(this.world, { sandbox: mode === 'sandbox' });
         this.transport = transport;
         this.soloGame = game;
       } else {
@@ -186,27 +187,18 @@ export class App {
     const q = this.renderer.q;
     const scene = this.renderer.scene;
     this.camera = this.renderer.camera;
-    const atlas = buildAtlas();
-    const detail = buildTerrainDetail();
-    this.terrain = buildTerrain(this.world, detail, q.terrainStep);
-    scene.add(this.terrain);
-    this.water = buildWater();
-    scene.add(this.water);
-    this.roads = buildRoads(this.world);
-    scene.add(this.roads);
-    this.structures = new StructureMesh(this.world, atlas, q);
-    scene.add(this.structures.group);
-    this.vegetation = new Vegetation(this.world, q, null);
-    scene.add(this.vegetation.group);
+    this.worldScene = new WorldScene(this.world, this.renderer);
+    this.structures = this.worldScene.structures;
+    this.access = new AccessIndex(this.world.zones);
     this.effects = new Effects(scene, q, (x, z) => this.world.terrain.heightAt(x, z));
     this.soldiers = new SoldierRenderer(scene, q);
     this.vehicles = new VehicleRenderer(scene);
     this.props = new PropRenderer(scene);
     this.mapView = new MapView(this.world);
     this.mapView.buildBase();
-    const base = this.world.bases[FACTION.COALITION];
-    this.camera.position.set(base.x + 80, base.y + 60, base.z + 80);
-    this.camera.lookAt(base.x, base.y, base.z);
+    const mid = this.world.tById.midvale;
+    this.camera.position.set(mid.x + 300, mid.y + 260, mid.z + 400);
+    this.camera.lookAt(mid.x, mid.y, mid.z);
   }
 
   initUI() {
@@ -221,6 +213,8 @@ export class App {
     this.deploy = new DeployScreen(ui, this);
     this.menu = new Menu(ui, this);
     this.wheel = new CommandWheel(ui, this);
+    this.dialog = new Dialog(ui, this);
+    this.sandbox = new Sandbox(ui, this);
     if (this.settings.touch) {
       this.touch = new TouchControls(ui);
       this.input.touch = this.touch;
@@ -274,13 +268,24 @@ export class App {
     const s = this.store;
     switch (msg.t) {
       case MSG.WELCOME:
-        s.patch({ id: msg.id, faction: msg.faction, profile: msg.profile, solo: msg.solo });
-        this.started = true;
+        s.patch({ id: msg.id, faction: msg.faction, profile: msg.profile, solo: msg.solo, admin: !!msg.admin });
         if (this.title) this.title.hide();
         if (this.loadEl) {
           this.loadEl.remove();
           this.loadEl = null;
         }
+        this.sandbox.setAdmin(!!msg.admin);
+        if (!msg.faction) {
+          // first time: choose a country to serve
+          this.countrySelect = new CountrySelect(this.ui, this, (country) => this.send({ t: MSG.ENLIST, country }));
+          break;
+        }
+        if (this.countrySelect) {
+          this.countrySelect.close();
+          this.countrySelect = null;
+        }
+        this.started = true;
+        this.props.myFaction = msg.faction;
         this.deploy.show(true);
         this.radioWelcome(msg.profile);
         break;
@@ -293,8 +298,21 @@ export class App {
         s.set('profile', msg.profile);
         break;
       case MSG.WAR:
+        setWars(msg.war.wars.map(([a, b]) => [a, b]));
         s.set('war', msg.war);
-        s.set('battles', msg.battles || []);
+        s.set('battles', msg.war.battles || []);
+        break;
+      case MSG.BUILDINGS:
+        this.structures.setBuildingStates(msg.list, !!msg.full);
+        break;
+      case MSG.DIALOG:
+        this.dialog.show(msg);
+        break;
+      case MSG.PERF:
+        this.sandbox.perf(msg);
+        break;
+      case MSG.ADMINSTATE:
+        this.sandbox.setState(msg);
         break;
       case MSG.MISSIONS:
         s.patch({ missions: msg.missions, operations: msg.operations || [], events: msg.events || [], tracked: msg.tracked });
@@ -363,9 +381,10 @@ export class App {
   }
 
   radioWelcome(p) {
-    const r = rankOf(p.rank);
-    if (!p.trainingComplete) this.hud.radio('command', 'Fort Sentinel', `Welcome, Recruit ${p.name}. Report to the training grounds.`, 1);
-    else this.hud.radio('command', 'HQ', `Welcome back, ${r.name} ${p.name}. The front is waiting.`, 1);
+    const f = this.store.get('faction');
+    const base = this.world.bases[f];
+    if (!p.trainingComplete) this.hud.radio('command', base ? base.name : 'HQ', `Welcome to the ${FACTION_INFO[f].army}, Recruit ${p.name}. Report to the training grounds.`, 1);
+    else this.hud.radio('command', 'HQ', `Welcome back, ${addressOf(p.rank)} ${p.name}. The front is waiting.`, 1);
   }
 
   processEvents(list) {
@@ -446,8 +465,40 @@ export class App {
           if (ev[1] === 'warn') au.uiClick('deny');
           break;
         case 'promo':
-          hud.promotion(ev[1]);
+          hud.promotion(ev[1], ev[3], ev[4]);
           au.fanfare('promotion');
+          break;
+        case 'promoReady':
+          hud.promotionReady(ev[1], ev[2]);
+          au.uiClick('ding');
+          break;
+        case 'restricted':
+          hud.restricted(ev[1], ev[2]);
+          au.uiClick('deny');
+          break;
+        case 'war': {
+          const a = FACTION_INFO[ev[2]];
+          const b = FACTION_INFO[ev[3]];
+          const mine = this.store.get('faction');
+          const involved = ev[2] === mine || ev[3] === mine;
+          hud.banner(ev[1] === 'declared' ? 'WAR DECLARED' : 'CEASEFIRE', `${a.name} ${ev[1] === 'declared' ? 'vs' : 'and'} ${b.name}`, ev[1] === 'declared' && involved ? 'bad' : 'promo');
+          if (ev[1] === 'declared' && involved) au.playMusic('battle');
+          break;
+        }
+        case 'battle': {
+          const t = this.world.tById[ev[2]];
+          const mine = this.store.get('faction');
+          if (t && (ev[3] === mine || ev[4] === mine)) hud.toast(`${ev[3] === mine ? 'ASSAULT' : 'UNDER ATTACK'}: ${t.name}`, ev[3] === mine ? 'order' : 'warn');
+          break;
+        }
+        case 'assignment':
+          hud.banner('NEW ASSIGNMENT', ev[2], 'promo');
+          break;
+        case 'drone':
+          fx.drone && fx.drone(ev[1], ev[2], ev[3]);
+          break;
+        case 'rallycry':
+          au.fanfare('medal');
           break;
         case 'medal':
           hud.medal(ev[1], ev[2]);
@@ -475,8 +526,13 @@ export class App {
         }
         case 'territory': {
           const t = this.world.tById[ev[1]];
-          const ours = ev[2] === this.store.get('faction');
-          hud.banner(ours ? `${t.name.toUpperCase()} LIBERATED` : `${t.name.toUpperCase()} HAS FALLEN`, ours ? 'The front line moves forward.' : 'Regroup and counterattack.', ours ? 'good' : 'bad');
+          const mine = this.store.get('faction');
+          const ours = ev[2] === mine;
+          if (!ours && ev[3] !== mine) {
+            hud.toast(`${t.name} fell to ${FACTION_INFO[ev[2]].short}`);
+            break;
+          }
+          hud.banner(ours ? `${t.name.toUpperCase()} ${t.faction === mine ? 'LIBERATED' : 'CAPTURED'}` : `${t.name.toUpperCase()} HAS FALLEN`, ours ? 'The front line moves forward.' : 'Regroup and counterattack.', ours ? 'good' : 'bad');
           break;
         }
         case 'mission':
@@ -547,7 +603,7 @@ export class App {
 
   isHostileEnt(id) {
     const e = this.cw.ents.get(id);
-    return !!(e && e.latest && e.latest.faction && e.latest.faction !== this.store.get('faction'));
+    return !!(e && e.latest && areHostile(e.latest.faction, this.store.get('faction')));
   }
 
   floatText(pos, text) {
@@ -633,6 +689,7 @@ export class App {
       input.lookDY = 0;
       input.wheel = 0;
     }
+    this.dialog.update();
     if (me.alive && this.started) me.update(dt, input);
     else input.look();
     // death -> deploy screen after a short pause
@@ -669,10 +726,25 @@ export class App {
       if (input.pressed('missions')) this.menu.open('missions');
       if (input.pressed('squad')) this.menu.open('squad');
     }
+    if (input.pressed('promote')) this.requestPromotion();
+    if (input.pressed('sandbox') && this.store.get('admin')) this.sandbox.toggle();
     if (this.player.alive && !this.menu.isOpen) {
       if (input.pressed('command')) this.wheel.show();
       if (this.wheel.open && input.released('command') && !input.touchMode) this.wheel.hide(true);
     }
+  }
+
+  // Accept the first available promotion (the server checks the venue).
+  requestPromotion(to) {
+    const p = this.store.get('profile');
+    if (!p) return;
+    const ready = promotionOptions(p).filter((o) => o.met);
+    const pick = to !== undefined ? ready.find((o) => o.to === to) : ready[0];
+    if (!pick) {
+      this.hud.toast('No promotion available yet — see the Career tab (Tab).');
+      return;
+    }
+    this.send({ t: MSG.PROMOTE, to: pick.to });
   }
 
   spectatorCamera(dt) {
@@ -682,7 +754,7 @@ export class App {
     if (this.deathAt && this.now - this.deathAt < 3.5 && me.s) focus = me.s;
     else {
       const sel = this.deploy.info && this.deploy.info.options.find((o) => o.id === this.deploy.selectedSpawn);
-      focus = sel ? { x: sel.x, y: this.world.terrain.heightAt(sel.x, sel.z), z: sel.z } : this.world.bases[this.store.get('faction') || 1];
+      focus = sel ? { x: sel.x, y: this.world.terrain.heightAt(sel.x, sel.z), z: sel.z } : this.world.bases[this.store.get('faction')] || this.world.tById.midvale;
     }
     this.specAngle = (this.specAngle || 0) + dt * 0.05;
     const y = Math.max(this.world.terrain.heightAt(focus.x, focus.z), focus.y || 0);
@@ -704,13 +776,6 @@ export class App {
     const cam = this.camera;
     const focus = me.alive ? me.s : { x: cam.position.x, y: cam.position.y - 20, z: cam.position.z };
     r.updateShadow(focus);
-    // water uniforms
-    const wu = this.water.material.uniforms;
-    wu.uTime.value = time;
-    wu.uSunDir.value.copy(r.sunDir);
-    wu.uSunColor.value.copy(r.sun.color).multiplyScalar(r.daylight);
-    wu.uSky.value.copy(r.sky.uniforms.uHorizon.value);
-    wu.uRain.value = r.env.rain;
     // soldiers
     const list = [];
     const rt = this.cw.renderTime();
@@ -750,16 +815,16 @@ export class App {
     }
     this.props.update(plist, dt, time, this.effects);
     this.effects.update(dt, time, cam, ws);
-    this.structures.update(cam, dt, time, r.daylight, this.effects);
-    this.structures.updateFlags(this.store.get('war'), time);
-    this.vegetation.update(time, ws ? ws.wind : 0.3);
+    const war = this.store.get('war');
+    this.worldScene.update(cam, dt, time, { effects: this.effects, war, wind: ws ? ws.wind : 0.3, windDir: ws ? ws.windDir : 0.6 });
+    this.effects.updateBattles(war ? war.battles : [], this.world, cam.position, dt);
     // audio
     const fwd = new THREE.Vector3();
     cam.getWorldDirection(fwd);
     this.audio.setListener(cam.position, fwd);
     this.audio.updateEngines(engines);
-    const base = this.world.bases[FACTION.COALITION];
-    const battles = (this.store.get('battles') || []).map((b) => this.world.tById[b.tid]).filter(Boolean);
+    const base = this.world.bases[this.store.get('faction')] || this.world.tById.midvale;
+    const battles = (this.store.get('battles') || []).map((b) => this.world.tById[b.t]).filter(Boolean);
     const biome = this.world.biomeAt(cam.position.x, cam.position.z);
     this.audio.updateAmbience({
       rain: r.env.rain, wind: ws ? ws.wind : 0.3, daylight: r.daylight, altitude: cam.position.y - this.world.terrain.heightAt(cam.position.x, cam.position.z),
@@ -802,4 +867,4 @@ export class App {
   }
 }
 
-export { dirFromYawPitch };
+export { dirFromYawPitch, FACTION };

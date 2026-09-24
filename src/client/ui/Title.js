@@ -15,6 +15,7 @@ export class TitleScreen {
     const solo = h('button', { class: 'btn big', onclick: () => go('solo') }, 'PLAY — SOLO CAMPAIGN');
     const mp = h('button', { class: 'btn big sec', onclick: () => go('mp') }, 'JOIN MULTIPLAYER SERVER');
     mp.style.display = opts.multiplayer ? '' : 'none';
+    const sandbox = h('button', { class: 'btn tiny sec tt-sandbox', title: 'A separate offline test world where you are the admin: set any rank, teleport, spawn, start wars. Your real career is not affected.', onclick: () => go('sandbox') }, 'Sandbox test world');
     const go = (mode) => {
       const n = name.value.trim();
       if (n.length < 2) {
@@ -24,6 +25,7 @@ export class TitleScreen {
       }
       solo.disabled = true;
       mp.disabled = true;
+      sandbox.disabled = true;
       opts.onStart({ mode, name: n, quality: quality.value });
     };
     name.addEventListener('keydown', (e) => {
@@ -34,10 +36,10 @@ export class TitleScreen {
       h('div', { class: 'tt-box' },
         h('div', { class: 'tt-kicker' }, 'ENLIST · FIGHT · COMMAND'),
         h('h1', {}, GAME_NAME.toUpperCase()),
-        h('p', { class: 'tt-sub' }, 'Join the Allied Coalition as a recruit. Take objectives, lead squads, earn your promotions — from Private to General — while the war for the eight territories rages around you.'),
+        h('p', { class: 'tt-sub' }, 'Three nations. One continent at war. Enlist as a recruit, travel a living world, fight in real battles and rise through thirty ranks — from Private to General of the Army.'),
         name,
         h('div', { class: 'tt-row' }, quality),
-        solo, mp,
+        solo, mp, sandbox,
         status,
         h('div', { class: 'tt-foot' }, opts.touch ? 'Touch controls enabled · landscape recommended' : 'Mouse + keyboard · gamepad supported · all audio and art generated live'),
       ),
