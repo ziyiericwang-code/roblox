@@ -87,9 +87,10 @@ export class Renderer {
     this.camera.updateProjectionMatrix();
   }
 
-  // Dynamic resolution keeps the frame rate playable on weaker devices.
-  trackFps(dt) {
-    this.fpsAcc += dt;
+  // Dynamic resolution keeps the frame rate playable on weaker devices; if that is
+  // not enough, shadows are switched off. `realDt` is the unclamped frame time.
+  trackFps(realDt) {
+    this.fpsAcc += realDt;
     this.fpsFrames++;
     if (this.fpsAcc >= 1) {
       this.fps = this.fpsFrames / this.fpsAcc;
@@ -101,6 +102,10 @@ export class Renderer {
         this.dynScale = Math.max(0.55, this.dynScale - 0.1);
         this.lowFpsTime = 0;
         this.resize();
+      } else if (this.lowFpsTime >= 4 && this.fps < 28 && this.sun.castShadow) {
+        this.sun.castShadow = false;
+        this.renderer.shadowMap.enabled = false;
+        this.lowFpsTime = 0;
       } else if (this.fps > 57 && this.dynScale < 1) {
         this.dynScale = Math.min(1, this.dynScale + 0.05);
         this.resize();

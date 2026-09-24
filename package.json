@@ -10,7 +10,8 @@
     "serve": "node src/server/index.js",
     "dev": "node scripts/build.mjs --watch & node src/server/index.js",
     "test": "node --test \"test/*.test.js\"",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "e2e:play": "node scripts/e2e-play.mjs"
   },
   "engines": {
     "node": ">=18"

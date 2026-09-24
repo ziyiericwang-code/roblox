@@ -141,5 +141,7 @@ npm test           # 47 tests: combat, progression, war, missions, squads/comman
 npm run e2e        # headless Chromium: title → deploy → spawn → menus → battle
 npm run e2e -- --mp        # same flow against the multiplayer server
 npm run e2e -- --mobile    # phone viewport with touch controls
+npm run e2e:play   # scripted play session: training skip, quartermaster, squad,
+                   # orders, officer ability, driving, flying, firefight, death/redeploy
 npm run dev        # rebuild on change while the server runs
 ```

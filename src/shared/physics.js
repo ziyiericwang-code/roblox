@@ -141,7 +141,7 @@ export function stepVehicle(v, inp, dt, colliders) {
     }
   }
   if (bumped) {
-    v.impact = Math.abs(v.speed);
+    v.impact = Math.max(v.impact || 0, Math.abs(v.speed));
     v.speed *= 0.55;
   }
   nx = clamp(nx, -WORLD_HALF + 4, WORLD_HALF - 4);
@@ -237,7 +237,7 @@ function stepAir(v, inp, dt, colliders) {
   // obstacle collision (buildings)
   const p = { x: v.x, y: v.y - 1, z: v.z };
   if (colliders.resolveCylinder(p, d.halfSize[0] * 1.4, 2.5, 0.2)) {
-    v.impact = Math.abs(v.speed);
+    v.impact = Math.max(v.impact || 0, Math.abs(v.speed));
     v.x = p.x;
     v.z = p.z;
     v.speed *= 0.3;

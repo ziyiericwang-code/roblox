@@ -247,7 +247,13 @@ export class LocalPlayer {
     }
     s.yaw = this.yaw;
     const prevVy = s.vy;
-    stepCharacter(s, { fwd: mv.fwd, right: mv.right, sprint: this.sprint, jump, ads: this.ads, downed, carrying: this.carrying }, dt, app.world.colliders);
+    // sub-step so slow frames cannot tunnel through thin walls
+    const steps = Math.ceil(dt / 0.034);
+    const inp = { fwd: mv.fwd, right: mv.right, sprint: this.sprint, jump, ads: this.ads, downed, carrying: this.carrying };
+    for (let i = 0; i < steps; i++) {
+      stepCharacter(s, inp, dt / steps, app.world.colliders);
+      inp.jump = false;
+    }
     if (s.grounded && prevVy < -13) this.landVel = prevVy;
     this.swimming = s.swimming;
     // footsteps
@@ -601,7 +607,8 @@ export class LocalPlayer {
       const inputs = { throttle: mv.fwd, steer: mv.right, up };
       // helicopters: mouse steers yaw
       if (def.air) inputs.steer = mv.right * 0.5;
-      stepVehicle(v, inputs, dt, app.world.colliders);
+      const steps = Math.ceil(dt / 0.034);
+      for (let i = 0; i < steps; i++) stepVehicle(v, inputs, dt / steps, app.world.colliders);
       if (def.air) {
         // helicopter heading follows the camera yaw
         const dy = wrapAngle(this.yaw - v.yaw);

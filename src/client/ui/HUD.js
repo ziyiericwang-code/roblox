@@ -188,9 +188,28 @@ export class HUD {
       el.classList.remove('on');
       return;
     }
+    if (!this.tb) {
+      // built once and updated in place so the buttons stay clickable
+      el.innerHTML = '<div class="tb-h">BASIC TRAINING <span class="tb-n"></span></div><div class="tb-t"></div><div class="tb-hint"></div><div class="tb-p"><i></i></div>'
+        + '<button class="tb-skip">Skip training</button>'
+        + '<div class="tb-confirm"><div>Skip basic training? You will be promoted to Private, but without the Basic Training Ribbon.</div>'
+        + '<button class="btn tiny tb-yes">Skip training</button><button class="btn tiny sec tb-no">Keep training</button></div>';
+      const q = (s) => el.querySelector(s);
+      this.tb = { n: q('.tb-n'), t: q('.tb-t'), hint: q('.tb-hint'), p: q('.tb-p'), bar: q('.tb-p i') };
+      q('.tb-skip').onclick = () => el.classList.add('confirming');
+      q('.tb-no').onclick = () => el.classList.remove('confirming');
+      q('.tb-yes').onclick = () => {
+        el.classList.remove('confirming');
+        this.app.skipTraining();
+      };
+    }
     el.classList.add('on');
-    el.innerHTML = `<div class="tb-h">BASIC TRAINING <span>${t.step + 1}/${t.total}</span></div><div class="tb-t">${esc(t.text)}</div><div class="tb-hint">${esc(t.hint || '')}</div>${t.prog ? `<div class="tb-p"><i style="width:${Math.round(t.prog * 100)}%"></i></div>` : ''}<button class="tb-skip">Skip training</button>`;
-    el.querySelector('.tb-skip').onclick = () => this.app.confirmSkipTraining();
+    const tb = this.tb;
+    tb.n.textContent = `${t.step + 1}/${t.total}`;
+    tb.t.textContent = t.text;
+    tb.hint.textContent = t.hint || '';
+    tb.p.style.display = t.prog ? '' : 'none';
+    tb.bar.style.width = `${Math.round((t.prog || 0) * 100)}%`;
   }
 
   // ------------------------------------------------------------------ frame

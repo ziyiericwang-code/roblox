@@ -234,6 +234,7 @@ export class App {
     // deploy button click is a user gesture: grab the pointer for FPS controls
     this.deploy.$.go.addEventListener('click', () => this.input.requestLock());
     this.input.onLockChange = (locked) => {
+      document.body.classList.toggle('mouse-locked', locked);
       if (!locked && this.player.alive && !this.menu.isOpen && !this.deploy.visible && !this.input.touchMode && this.started) this.showPausedHint(true);
       else this.showPausedHint(false);
     };
@@ -260,8 +261,8 @@ export class App {
     this.fatal('Disconnected from the server.');
   }
 
-  confirmSkipTraining() {
-    if (confirm('Skip basic training? You will be promoted to Private but will not receive the Basic Training Ribbon.')) this.send({ t: MSG.TRAINING, a: 'skip' });
+  skipTraining() {
+    this.send({ t: MSG.TRAINING, a: 'skip' });
   }
 
   // ------------------------------------------------------------------ messages
@@ -606,7 +607,10 @@ export class App {
   // ------------------------------------------------------------------ frame
   frame(t) {
     requestAnimationFrame((tt) => this.frame(tt));
-    const dt = Math.min(0.05, Math.max(0.001, (t - this.last) / 1000));
+    // real frame time (for fps tracking) and the simulation step: gameplay stays
+    // real-time down to 10 fps (physics is sub-stepped), below that it slows down
+    this.realDt = Math.min(1, Math.max(0.001, (t - this.last) / 1000));
+    const dt = Math.min(0.1, this.realDt);
     this.last = t;
     this.time += dt;
     const input = this.input;
@@ -775,7 +779,7 @@ export class App {
       }
     }
     r.render();
-    r.trackFps(dt);
+    r.trackFps(this.realDt);
   }
 
   drawFloats() {

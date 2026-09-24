@@ -24,12 +24,14 @@ export class Store {
       solo: false,
     };
     this.listeners = new Map();
+    this.version = 0; // bumps on every change (cheap "did anything change" check)
   }
   get(k) {
     return this.state[k];
   }
   set(k, v) {
     this.state[k] = v;
+    this.version++;
     this.emit(k, v);
   }
   patch(obj) {

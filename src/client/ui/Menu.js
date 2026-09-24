@@ -39,6 +39,19 @@ export class Menu {
     this.tab = 'map';
     this.isOpen = false;
     this.refreshTimer = 0;
+    this.pressing = false;
+    this.holdUntil = 0;
+    this.body.addEventListener('pointerdown', () => {
+      this.pressing = true;
+    });
+    window.addEventListener('pointerup', () => {
+      if (!this.pressing) return;
+      this.pressing = false;
+      this.holdUntil = performance.now() + 400;
+    });
+    window.addEventListener('pointercancel', () => {
+      this.pressing = false;
+    });
     this.pendingAbility = null;
     this.selectedTerritory = null;
   }
@@ -75,7 +88,13 @@ export class Menu {
     if (!this.isOpen) return;
     this.refreshTimer += dt;
     if (this.tab === 'map') this.drawMap();
-    if (this.refreshTimer > 1 && this.tab !== 'settings' && this.tab !== 'map' && !this.el.contains(document.activeElement)) {
+    if (this.tab === 'settings' || this.tab === 'map' || this.el.contains(document.activeElement)) return;
+    // Rebuild when the data changed (or every few seconds for cooldown timers), but
+    // never under a press in progress: replacing the element between pointerdown and
+    // pointerup would swallow the click.
+    const changed = this.app.store.version !== this.renderedVersion;
+    if ((changed && this.refreshTimer > 0.5) || this.refreshTimer > 3) {
+      if (this.pressing || performance.now() < this.holdUntil) return;
       this.refreshTimer = 0;
       this.render();
     }
@@ -83,6 +102,7 @@ export class Menu {
 
   render() {
     const b = this.body;
+    this.renderedVersion = this.app.store.version;
     clear(b);
     switch (this.tab) {
       case 'map': return this.renderMap(b);
