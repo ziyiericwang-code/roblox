@@ -44,9 +44,10 @@ function bodyGeometry(s) {
     return 0.26;
   }
   const crouch = s.stance === STANCE.CROUCH;
-  const hip = crouch ? 0.55 : 0.9;
-  const shoulder = crouch ? 1.0 : 1.42;
-  const head = crouch ? 1.12 : 1.6;
+  // Torso capsule top (shoulder + radius) stays just below the head sphere so
+  // aimed headshots register as headshots. Matches the rendered model.
+  const shoulder = crouch ? 0.95 : 1.3;
+  const head = crouch ? 1.25 : 1.62;
   const lx = rx * lean * 0.35;
   const lz = rz * lean * 0.35;
   A.x = s.x;
@@ -58,7 +59,7 @@ function bodyGeometry(s) {
   H.x = s.x + lx;
   H.y = s.y + head;
   H.z = s.z + lz;
-  return crouch ? 0.34 : 0.3;
+  return crouch ? 0.27 : 0.26;
 }
 
 /**
@@ -67,7 +68,7 @@ function bodyGeometry(s) {
  */
 export function raySoldier(o, d, maxT, s) {
   const r = bodyGeometry(s);
-  const th = raySphere(o, d, H, 0.17, maxT);
+  const th = raySphere(o, d, H, 0.18, maxT);
   // torso: from hip to shoulder; legs from feet to hip
   let best = null;
   if (th >= 0) best = { t: th, zone: ZONE.HEAD };
