@@ -18,21 +18,25 @@ const MAX_MSG = 16 * 1024;
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
-export async function startServer({ port = PORT, dataDir = DATA, quiet = false } = {}) {
+export async function startServer({ port = PORT, dataDir = DATA, quiet = false, noGame = false } = {}) {
   const log = quiet ? { log() {}, info() {}, warn() {}, error: console.error } : console;
-  const t0 = Date.now();
-  const world = generateWorld(WORLD_SEED, { nav: true });
-  log.info(`[${GAME_NAME}] world generated in ${Date.now() - t0} ms (${world.colliders.count} colliders, ${world.trees.length} trees)`);
-  const store = new FileStore(dataDir);
-  await store.init();
-  const game = new Game({ world, store, log, options: {} });
-  await game.init();
-  game.start();
+  let game = null;
+  let store = null;
+  if (!noGame) {
+    const t0 = Date.now();
+    const world = generateWorld(WORLD_SEED, { nav: true });
+    log.info(`[${GAME_NAME}] world generated in ${Date.now() - t0} ms (${world.colliders.count} colliders, ${world.trees.length} trees)`);
+    store = new FileStore(dataDir);
+    await store.init();
+    game = new Game({ world, store, log, options: {} });
+    await game.init();
+    game.start();
+  }
 
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
-      if (url.pathname === '/api/info') {
+      if (url.pathname === '/api/info' && game) {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify({ name: GAME_NAME, multiplayer: true, protocol: PROTOCOL_VERSION, players: game.playersOnline(), tickMs: Math.round(game.tickMsAvg * 100) / 100, npcs: game.npc.combatCount(), campaign: game.war.campaign }));
         return;
@@ -56,6 +60,10 @@ export async function startServer({ port = PORT, dataDir = DATA, quiet = false }
 
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_MSG, perMessageDeflate: false });
   wss.on('connection', (ws) => {
+    if (!game) {
+      ws.close();
+      return;
+    }
     const handlers = { msg: null, close: null };
     const conn = {
       send(msg) {
@@ -98,8 +106,8 @@ export async function startServer({ port = PORT, dataDir = DATA, quiet = false }
 
   const shutdown = async () => {
     log.info('shutting down: saving profiles and war state...');
-    await game.shutdown();
-    await store.flush();
+    if (game) await game.shutdown();
+    if (store) await store.flush();
     wss.close();
     server.close();
   };

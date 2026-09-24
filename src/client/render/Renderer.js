@@ -4,11 +4,21 @@ import * as THREE from 'three';
 import { SkyDome } from './Sky.js';
 import { clamp, lerp, smoothstep } from '../../shared/math.js';
 
+// Performance profiles. Gameplay is identical on every profile; only view
+// distance, shadows, vegetation density and effects change.
 export const QUALITY = {
-  low: { pixelRatio: 0.75, shadows: 0, draw: 420, trees: 0.45, particles: 0.5, terrainStep: 2, antialias: false, lights: 2 },
-  medium: { pixelRatio: 1.0, shadows: 1024, draw: 650, trees: 0.75, particles: 0.8, terrainStep: 1, antialias: true, lights: 4 },
-  high: { pixelRatio: 1.5, shadows: 2048, draw: 950, trees: 1, particles: 1, terrainStep: 1, antialias: true, lights: 6 },
-  ultra: { pixelRatio: 2, shadows: 4096, draw: 1300, trees: 1, particles: 1.2, terrainStep: 1, antialias: true, lights: 8 },
+  low: {
+    label: 'Low', pixelRatio: 0.75, shadows: 0, draw: 1500, detail: 300, roadDraw: 450, lodSplit: 1.3,
+    trees: 0.6, treesNear: 170, treesFar: 650, treesNearCap: 6000, treesFarCap: 12000, particles: 0.5, antialias: false, lights: 2, terrainStep: 2,
+  },
+  medium: {
+    label: 'Medium', pixelRatio: 1.0, shadows: 1024, draw: 2300, detail: 480, roadDraw: 650, lodSplit: 1.7,
+    trees: 0.85, treesNear: 260, treesFar: 1100, treesNearCap: 12000, treesFarCap: 30000, particles: 0.8, antialias: true, lights: 4, terrainStep: 1,
+  },
+  high: {
+    label: 'High', pixelRatio: 1.5, shadows: 2048, draw: 3300, detail: 700, roadDraw: 850, lodSplit: 2.1,
+    trees: 1, treesNear: 360, treesFar: 1700, treesNearCap: 20000, treesFarCap: 50000, particles: 1, antialias: true, lights: 6, terrainStep: 1,
+  },
 };
 
 export function detectQuality() {
@@ -18,9 +28,14 @@ export function detectQuality() {
   return cores >= 8 ? 'high' : 'medium';
 }
 
+export function resolveQuality(name) {
+  if (QUALITY[name]) return name;
+  return name === 'ultra' ? 'high' : detectQuality();
+}
+
 export class Renderer {
   constructor(canvas, qualityName) {
-    this.qualityName = QUALITY[qualityName] ? qualityName : detectQuality();
+    this.qualityName = resolveQuality(qualityName);
     this.q = QUALITY[this.qualityName];
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.q.antialias, powerPreference: 'high-performance', stencil: false });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -29,7 +44,7 @@ export class Renderer {
     this.renderer.shadowMap.enabled = this.q.shadows > 0;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(72, 1, 0.1, this.q.draw + 300);
+    this.camera = new THREE.PerspectiveCamera(72, 1, 0.15, this.q.draw + 400);
     this.scene.add(this.camera);
     this.dynScale = 1;
     this.fpsAcc = 0;
@@ -72,7 +87,7 @@ export class Renderer {
     if (!QUALITY[name]) return;
     this.qualityName = name;
     this.q = QUALITY[name];
-    this.camera.far = this.q.draw + 300;
+    this.camera.far = this.q.draw + 400;
     this.camera.updateProjectionMatrix();
     this.resize();
   }
@@ -164,7 +179,9 @@ export class Renderer {
     const fogCol = hor.clone().lerp(grey.clone().multiplyScalar(0.25 + 0.6 * day), Math.max(e.fog, overcast * 0.5));
     this.scene.fog.color.copy(fogCol);
     const baseDensity = 1.9 / this.q.draw;
-    this.scene.fog.density = baseDensity + e.fog * 0.0055 + e.rain * 0.0012 + (1 - day) * 0.0004;
+    // thinner haze when looking down from altitude (aircraft, mountain tops)
+    const alt = Math.max(0, this.camera.position.y - 60);
+    this.scene.fog.density = (baseDensity + e.fog * 0.0055 + e.rain * 0.0012 + (1 - day) * 0.0004) / (1 + alt / 260);
     this.renderer.toneMappingExposure = 0.95 + (1 - day) * 0.35;
   }
 
@@ -182,7 +199,20 @@ export class Renderer {
     this.sun.shadow.camera.updateProjectionMatrix();
   }
 
+  // Far plane grows with altitude so the whole map is visible from aircraft;
+  // the sky dome always sits just inside it.
+  updateFar() {
+    const cam = this.camera;
+    const far = Math.min(9000, this.q.draw + 400 + Math.max(0, cam.position.y - 80) * 2.4);
+    if (Math.abs(far - cam.far) > cam.far * 0.04) {
+      cam.far = far;
+      cam.updateProjectionMatrix();
+    }
+    this.sky.mesh.scale.setScalar(cam.far * 0.9);
+  }
+
   render() {
+    this.updateFar();
     this.sky.mesh.position.copy(this.camera.position);
     this.renderer.render(this.scene, this.camera);
   }

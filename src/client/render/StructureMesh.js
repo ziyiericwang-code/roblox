@@ -3,14 +3,14 @@
 // Also owns animated props (windmills, radar dishes, beacons), sector flags
 // and the night lighting pool.
 import * as THREE from 'three';
-import { WORLD_HALF, FACTION } from '../../shared/constants.js';
+import { WORLD_HALF } from '../../shared/constants.js';
 import { MAT, MAT_INFO } from '../../shared/world/materials.js';
 import { BF } from '../../shared/world/builder.js';
 import { ATLAS_GRID, ATLAS_PAD, tileOffset } from './Textures.js';
 import { srgbToLinear } from './TerrainMesh.js';
 import { mulberry32 } from '../../shared/math.js';
 
-const CHUNK = 200;
+const CHUNK = 128;
 const NCH = Math.ceil((WORLD_HALF * 2) / CHUNK);
 
 // metres covered by one texture tile per pattern: [u, v]
@@ -270,17 +270,40 @@ function addSphere(cb, p, color, tile, scale, detail = 1, jitterSeed = 0, hemi =
   geo.dispose();
 }
 
+// Distant buildings: one box per building in a single merged mesh. A per-chunk
+// visibility texture hides the silhouette wherever the detailed chunk is loaded.
+function silhouetteMaterial(visTex) {
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uVis = { value: visTex };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec2 chunkUv;\nuniform sampler2D uVis;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nif (texture2D(uVis, chunkUv).r > 0.5) transformed = vec3(0.0, -99999.0, 0.0);');
+  };
+  mat.customProgramCacheKey = () => 'silhouette-v1';
+  return mat;
+}
+
 export class StructureMesh {
   constructor(world, atlas, quality) {
     this.world = world;
     this.group = new THREE.Group();
     this.material = atlasMaterial(atlas);
     this.lampMat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0xffd9a0, emissiveIntensity: 0 });
-    this.chunks = [];
     this.animated = [];
     this.flags = [];
     this.quality = quality;
-    this.build();
+    this.detail = quality.detail ?? quality.draw ?? 600;
+    this.smallDetail = Math.min(260, this.detail * 0.45);
+    this.built = new Map(); // chunk -> {big, small}
+    this.visData = new Uint8Array(NCH * NCH);
+    this.visTex = new THREE.DataTexture(this.visData, NCH, NCH, THREE.RedFormat, THREE.UnsignedByteType);
+    this.visTex.magFilter = THREE.NearestFilter;
+    this.visTex.minFilter = THREE.NearestFilter;
+    this.visTex.needsUpdate = true;
+    this.index();
+    this.buildLamps();
+    this.buildSilhouettes();
     this.buildAnimated();
     this.buildFlags();
     this.lightPool = [];
@@ -291,6 +314,7 @@ export class StructureMesh {
       this.lightPool.push(L);
     }
     this.lightTimer = 0;
+    this.frame = 0;
   }
 
   chunkOf(x, z) {
@@ -299,67 +323,81 @@ export class StructureMesh {
     return cz * NCH + cx;
   }
 
-  build() {
-    const world = this.world;
-    const big = new Map();
-    const small = new Map();
-    const lamps = new ChunkBuilder();
-    const get = (map, k) => {
-      let c = map.get(k);
-      if (!c) map.set(k, (c = new ChunkBuilder()));
-      return c;
+  // Bucket renderable boxes and props per chunk (indices only).
+  index() {
+    this.boxIdx = new Map();
+    this.propIdx = new Map();
+    const push = (map, k, i) => {
+      let a = map.get(k);
+      if (!a) map.set(k, (a = []));
+      a.push(i);
     };
-    const rand = mulberry32(5);
-    for (const b of world.boxes) {
-      if (!(b.f & BF.RENDER)) continue;
+    const boxes = this.world.boxes;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (!(b.f & BF.RENDER) || b.m === MAT.LAMP) continue;
+      push(this.boxIdx, this.chunkOf((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2), i);
+    }
+    const props = this.world.props;
+    for (let i = 0; i < props.length; i++) {
+      const p = props[i];
+      if (p.t === 'bridge' || p.t === 'blades' || p.t === 'dish' || p.t === 'smoke' || p.t === 'maptable') continue;
+      if (p.t === 'sphere' && p.m === MAT.LAMP) continue;
+      push(this.propIdx, this.chunkOf(p.x, p.z), i);
+    }
+    this.chunkKeys = new Set([...this.boxIdx.keys(), ...this.propIdx.keys()]);
+  }
+
+  buildChunk(k, wantSmall) {
+    const world = this.world;
+    const big = new ChunkBuilder();
+    const small = wantSmall ? new ChunkBuilder() : null;
+    const rand = mulberry32(k * 7 + 5);
+    for (const i of this.boxIdx.get(k) || []) {
+      const b = world.boxes[i];
+      if (b.dead) continue;
       const cx = (b.x0 + b.x1) / 2;
       const cz = (b.z0 + b.z1) / 2;
-      if (b.m === MAT.LAMP) {
-        addBox(lamps, b, [1, 1, 1], [0, 0], [1, 1], true);
-        continue;
-      }
-      const k = this.chunkOf(cx, cz);
       const vol = (b.x1 - b.x0) * (b.y1 - b.y0) * (b.z1 - b.z0);
       const isSmall = (b.f & BF.SMALL) || vol < 1.5;
-      const cb = get(isSmall ? small : big, k);
+      if (isSmall && !small) continue;
       const ground = world.terrain.heightAt(cx, cz);
-      addBox(cb, b, matColor(b.m, rand), matTile(b.m), matScale(b.m), b.y0 <= ground + 0.05);
+      addBox(isSmall ? small : big, b, matColor(b.m, rand), matTile(b.m), matScale(b.m), b.y0 <= ground + 0.05);
     }
-    for (const p of world.props) {
-      const k = this.chunkOf(p.x, p.z);
+    for (const i of this.propIdx.get(k) || []) {
+      const p = world.props[i];
       const color = matColor(p.m ?? MAT.CONCRETE, rand);
       const tile = matTile(p.m ?? MAT.CONCRETE);
       const scale = matScale(p.m ?? MAT.CONCRETE);
+      const pick = (isSmall) => (isSmall ? small : big);
       switch (p.t) {
-        case 'cyl': addCylinder(get(p.r < 1 ? small : big, k), p, color, tile, scale); break;
-        case 'cone': addCylinder(get(big, k), p, color, tile, scale, true); break;
-        case 'prism': addPrism(get(big, k), p, color, tile, scale); break;
-        case 'sphere':
-          if (p.m === MAT.LAMP) addSphere(lamps, p, [1, 1, 1], [0, 0], [1, 1], 1);
-          else addSphere(get(small, k), p, color, tile, scale, 1);
-          break;
-        case 'dome': addSphere(get(big, k), { ...p, r: p.r }, color, tile, scale, 2, 0, true); break;
-        case 'rock': addSphere(get(p.s > 1.8 ? big : small, k), { x: p.x, y: p.y, z: p.z, s: p.s, sx: p.s * 1.1, sy: p.s * 0.8, sz: p.s }, color, tile, scale, 1, p.seed || 7); break;
+        case 'cyl': { const cb = pick(p.r < 1); if (cb) addCylinder(cb, p, color, tile, scale); break; }
+        case 'cone': addCylinder(big, p, color, tile, scale, true); break;
+        case 'prism': addPrism(big, p, color, tile, scale); break;
+        case 'sphere': if (small) addSphere(small, p, color, tile, scale, 1); break;
+        case 'dome': addSphere(big, { ...p, r: p.r }, color, tile, scale, 2, 0, true); break;
+        case 'rock': { const cb = pick(p.s <= 1.8); if (cb) addSphere(cb, { x: p.x, y: p.y, z: p.z, s: p.s, sx: p.s * 1.1, sy: p.s * 0.8, sz: p.s }, color, tile, scale, 1, p.seed || 7); break; }
         case 'plane': {
-          const cb = get(small, k);
+          if (!small) break;
           const hw = p.w / 2;
           const hd = p.d / 2;
-          cb.quad([p.x - hw, p.y, p.z + hd], [p.x + hw, p.y, p.z + hd], [p.x + hw, p.y, p.z - hd], [p.x - hw, p.y, p.z - hd], [0, 1, 0], [[0, 1], [1, 1], [1, 0], [0, 0]].map(([u, v]) => [u * 0.999, v * 0.999]), color, tile);
+          small.quad([p.x - hw, p.y, p.z + hd], [p.x + hw, p.y, p.z + hd], [p.x + hw, p.y, p.z - hd], [p.x - hw, p.y, p.z - hd], [0, 1, 0], [[0, 1], [1, 1], [1, 0], [0, 0]].map(([u, v]) => [u * 0.999, v * 0.999]), color, tile);
           break;
         }
         case 'hedgehog': {
-          const cb = get(small, k);
-          for (let i = 0; i < 3; i++) {
-            const yaw = p.yaw + (i * Math.PI) / 3;
+          if (!small) break;
+          for (let j = 0; j < 3; j++) {
+            const yaw = p.yaw + (j * Math.PI) / 3;
             const [dx, dz] = rotY(0.7, 0, yaw);
-            addCylinder(cb, { x: p.x - dx, y: p.y, z: p.z - dz, r: 0.08, h: 1.4, seg: 4, yaw, lying: true }, color, tile, scale);
+            addCylinder(small, { x: p.x - dx, y: p.y, z: p.z - dz, r: 0.08, h: 1.4, seg: 4, yaw, lying: true }, color, tile, scale);
           }
           break;
         }
         case 'mast': {
-          const cb = get(small, k);
+          const cb = p.h > 16 ? big : small;
+          if (!cb) break;
           const w = p.w / 2;
-          for (const [ox, oz] of [[-w, -w], [w, -w], [w, w], [-w, w]]) addCylinder(cb, { x: p.x + ox * 0.6, y: p.y, z: p.z + oz * 0.6, r: 0.06, h: p.h, seg: 4 }, color, tile, scale);
+          for (const [ox, oz] of [[-w, -w], [w, -w], [w, w], [-w, w]]) addCylinder(cb, { x: p.x + ox * 0.6, y: p.y, z: p.z + oz * 0.6, r: 0.07, h: p.h, seg: 4 }, color, tile, scale);
           for (let y = 2; y < p.h; y += 3) addBox(cb, { x0: p.x - w * 0.6, y0: p.y + y, z0: p.z - w * 0.6, x1: p.x + w * 0.6, y1: p.y + y + 0.08, z1: p.z + w * 0.6 }, color, tile, scale, false);
           break;
         }
@@ -367,18 +405,44 @@ export class StructureMesh {
           break;
       }
     }
-    const drawBig = this.quality.draw;
-    for (const [k, cb] of big) {
-      const m = cb.build(this.material);
-      if (m) this.addChunk(m, k, drawBig);
+    const out = { big: big.build(this.material), small: small ? small.build(this.material) : null };
+    if (out.big) this.group.add(out.big);
+    if (out.small) {
+      out.small.castShadow = this.quality.shadows >= 2048;
+      this.group.add(out.small);
     }
-    for (const [k, cb] of small) {
-      const m = cb.build(this.material);
-      if (m) {
-        m.castShadow = this.quality.shadows >= 2048;
-        this.addChunk(m, k, Math.min(260, drawBig * 0.5));
-      }
+    return out;
+  }
+
+  dropChunk(k, e) {
+    for (const m of [e.big, e.small]) {
+      if (!m) continue;
+      this.group.remove(m);
+      m.geometry.dispose();
     }
+    this.built.delete(k);
+    this.visData[k] = 0;
+    this.visDirty = true;
+  }
+
+  // Rebuild a chunk (used by destruction when building states change).
+  refreshAt(x, z) {
+    const k = this.chunkOf(x, z);
+    const e = this.built.get(k);
+    if (e) {
+      const small = !!e.small;
+      this.dropChunk(k, e);
+      this.built.set(k, this.buildChunk(k, small));
+      this.visData[k] = 1;
+      this.visDirty = true;
+    }
+    this.silDirty = true;
+  }
+
+  buildLamps() {
+    const lamps = new ChunkBuilder();
+    for (const b of this.world.boxes) if ((b.f & BF.RENDER) && b.m === MAT.LAMP) addBox(lamps, b, [1, 1, 1], [0, 0], [1, 1], true);
+    for (const p of this.world.props) if (p.t === 'sphere' && p.m === MAT.LAMP && !p.blink && !p.beacon) addSphere(lamps, p, [1, 1, 1], [0, 0], [1, 1], 1);
     const lm = lamps.build(this.lampMat);
     if (lm) {
       lm.castShadow = false;
@@ -386,11 +450,74 @@ export class StructureMesh {
     }
   }
 
-  addChunk(mesh, k, dist) {
-    const cx = (k % NCH) * CHUNK - WORLD_HALF + CHUNK / 2;
-    const cz = Math.floor(k / NCH) * CHUNK - WORLD_HALF + CHUNK / 2;
-    this.group.add(mesh);
-    this.chunks.push({ mesh, cx, cz, dist: dist + CHUNK * 0.71 });
+  buildSilhouettes() {
+    const world = this.world;
+    const byId = new Map();
+    for (const bd of world.buildings) byId.set(bd.id, { bd, area: new Map() });
+    for (const b of world.boxes) {
+      if (!b.bid || !(b.f & BF.RENDER)) continue;
+      const e = byId.get(b.bid);
+      if (!e) continue;
+      const a = (b.x1 - b.x0) * (b.z1 - b.z0) + (b.y1 - b.y0) * ((b.x1 - b.x0) + (b.z1 - b.z0));
+      e.area.set(b.m, (e.area.get(b.m) || 0) + a);
+    }
+    const pos = [];
+    const nor = [];
+    const col = [];
+    const cuv = [];
+    const rand = mulberry32(99);
+    for (const { bd, area } of byId.values()) {
+      if (bd.dead || bd.y1 - bd.y0 < 2.5 || !isFinite(bd.x0)) continue;
+      let bestM = MAT.CONCRETE;
+      let bestA = -1;
+      for (const [m, a] of area) {
+        if (m === MAT.WINDOW && area.size > 1) continue;
+        if (a > bestA) {
+          bestA = a;
+          bestM = m;
+        }
+      }
+      const c = matColor(bestM, rand);
+      const k = this.chunkOf((bd.x0 + bd.x1) / 2, (bd.z0 + bd.z1) / 2);
+      const u = ((k % NCH) + 0.5) / NCH;
+      const v = (Math.floor(k / NCH) + 0.5) / NCH;
+      const inset = 0.15;
+      const x0 = bd.x0 + inset;
+      const x1 = bd.x1 - inset;
+      const z0 = bd.z0 + inset;
+      const z1 = bd.z1 - inset;
+      const y0 = bd.y0;
+      const y1 = bd.y1;
+      const quad = (a, b, cc, d, n, shade) => {
+        for (const p of [a, b, cc, a, cc, d]) {
+          pos.push(p[0], p[1], p[2]);
+          nor.push(n[0], n[1], n[2]);
+          col.push(c[0] * shade, c[1] * shade, c[2] * shade);
+          cuv.push(u, v);
+        }
+      };
+      quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], 0.95);
+      quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], 0.95);
+      quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], 0.9);
+      quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], 0.9);
+      quad([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], 0.8);
+    }
+    if (!pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('chunkUv', new THREE.Float32BufferAttribute(cuv, 2));
+    g.computeBoundingSphere();
+    if (this.silhouettes) {
+      this.group.remove(this.silhouettes);
+      this.silhouettes.geometry.dispose();
+    }
+    this.silhouettes = new THREE.Mesh(g, this.silMat || (this.silMat = silhouetteMaterial(this.visTex)));
+    this.silhouettes.castShadow = false;
+    this.silhouettes.receiveShadow = true;
+    this.silhouettes.matrixAutoUpdate = false;
+    this.group.add(this.silhouettes);
   }
 
   buildAnimated() {
@@ -410,7 +537,7 @@ export class StructureMesh {
         g.position.set(p.x, p.y, p.z);
         g.rotation.y = p.yaw;
         this.group.add(g);
-        this.animated.push({ obj: g, type: 'blades', axis: 'z' });
+        this.animated.push({ obj: g, type: 'blades', x: p.x, z: p.z });
       } else if (p.t === 'dish') {
         const g = new THREE.Group();
         const dish = new THREE.Mesh(new THREE.SphereGeometry(p.r, 16, 8, 0, Math.PI * 2, 0, Math.PI / 3.2), mat);
@@ -422,12 +549,12 @@ export class StructureMesh {
         g.add(stem);
         g.position.set(p.x, p.y, p.z);
         this.group.add(g);
-        this.animated.push({ obj: g, type: 'dish', speed: p.spin || 0.5 });
+        this.animated.push({ obj: g, type: 'dish', speed: p.spin || 0.5, x: p.x, z: p.z });
       } else if (p.t === 'sphere' && (p.blink || p.beacon)) {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(p.r * 1.3, 8, 6), new THREE.MeshBasicMaterial({ color: p.beacon ? 0xfff0b0 : 0xff3020, transparent: true }));
+        const m = new THREE.Mesh(new THREE.SphereGeometry(p.r * 1.3, 8, 6), new THREE.MeshBasicMaterial({ color: p.beacon ? 0xfff0b0 : 0xff3020, transparent: true, fog: true }));
         m.position.set(p.x, p.y, p.z);
         this.group.add(m);
-        this.animated.push({ obj: m, type: p.beacon ? 'beacon' : 'blink', phase: Math.random() * 6 });
+        this.animated.push({ obj: m, type: p.beacon ? 'beacon' : 'blink', phase: Math.random() * 6, x: p.x, z: p.z });
       } else if (p.t === 'smoke') {
         this.animated.push({ type: 'chimney', x: p.x, y: p.y, z: p.z, acc: Math.random() });
       }
@@ -443,24 +570,38 @@ export class StructureMesh {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(f.x, f.y, f.z);
       m.castShadow = false;
+      m.visible = false;
       this.group.add(m);
-      this.flags.push({ key: f.key, mesh: m, base: geo.attributes.position.array.slice(), owner: -1 });
+      this.flags.push({ key: f.key, mesh: m, base: geo.attributes.position.array.slice(), owner: -1, x: f.x, z: f.z });
     }
   }
 
-  // war: client war view; used to color sector flags by owner
-  updateFlags(war, time, windDir = 0.6) {
+  // war: client war view; used to colour flags by owner
+  updateFlags(war, time, windDir = 0.6, camera) {
     const owners = new Map();
-    if (war) for (const t of war.territories) for (const s of t.sectors) owners.set(`${t.id}:${s.id}`, s.owner);
+    const tOwner = new Map();
+    if (war) {
+      for (const t of war.territories) {
+        tOwner.set(t.id, t.owner);
+        for (const s of t.sectors) owners.set(`${t.id}:${s.id}`, s.owner);
+      }
+    }
+    const cx = camera ? camera.position.x : 0;
+    const cz = camera ? camera.position.z : 0;
     for (const fl of this.flags) {
+      const near = !camera || Math.abs(fl.x - cx) + Math.abs(fl.z - cz) < 700;
+      fl.mesh.visible = near;
+      if (!near) continue;
       let owner;
-      if (fl.key.startsWith('base:')) owner = fl.key.includes('coalition') ? FACTION.COALITION : FACTION.DOMINION;
-      else owner = owners.get(fl.key) ?? 0;
+      if (fl.key === 'country') owner = this.areaOwner(fl.x, fl.z, tOwner);
+      else if (fl.key.startsWith('border:')) {
+        const parts = fl.key.split(':');
+        owner = Number(fl.key.endsWith(':a') ? parts[1] : parts[2]);
+      } else owner = owners.get(fl.key) ?? 0;
       if (owner !== fl.owner) {
         fl.owner = owner;
-        fl.mesh.material.color.set(owner === FACTION.COALITION ? 0x3d6fc0 : owner === FACTION.DOMINION ? 0xb3302a : 0xe8e8e8);
+        fl.mesh.material.color.set(FLAG_COLORS[owner] ?? 0xe8e8e8);
       }
-      // wave
       const pos = fl.mesh.geometry.attributes.position;
       const a = pos.array;
       const b = fl.base;
@@ -473,14 +614,78 @@ export class StructureMesh {
     }
   }
 
+  areaOwner(x, z, tOwner) {
+    for (const hq of this.world.hqs) {
+      const [hx, hz] = this.world.bases[hq.faction].rect;
+      if (Math.abs(x - hq.x) < hx + 10 && Math.abs(z - hq.z) < hz + 10) return hq.faction;
+    }
+    const t = this.world.regions.territoryAt(x, z);
+    return t ? tOwner.get(t.id) ?? t.country : 0;
+  }
+
   update(camera, dt, time, daylight, effects) {
+    this.frame++;
     const cx = camera.position.x;
     const cz = camera.position.z;
-    for (const c of this.chunks) {
-      const d = Math.hypot(c.cx - cx, c.cz - cz);
-      c.mesh.visible = d < c.dist;
+    // stream detailed chunks in and out
+    const R = this.detail;
+    const ci = Math.floor((cx + WORLD_HALF) / CHUNK);
+    const cj = Math.floor((cz + WORLD_HALF) / CHUNK);
+    const rr = Math.ceil(R / CHUNK) + 1;
+    const todo = [];
+    for (let j = cj - rr; j <= cj + rr; j++) {
+      for (let i = ci - rr; i <= ci + rr; i++) {
+        if (i < 0 || j < 0 || i >= NCH || j >= NCH) continue;
+        const k = j * NCH + i;
+        if (!this.chunkKeys.has(k)) continue;
+        const ccx = (i + 0.5) * CHUNK - WORLD_HALF;
+        const ccz = (j + 0.5) * CHUNK - WORLD_HALF;
+        const d = Math.hypot(ccx - cx, ccz - cz);
+        const e = this.built.get(k);
+        const wantSmall = d < this.smallDetail + CHUNK * 0.7;
+        if (d < R + CHUNK * 0.7) {
+          if (!e || (wantSmall && !e.small)) todo.push({ k, d, wantSmall, e });
+        }
+      }
+    }
+    if (todo.length) {
+      todo.sort((a, b) => a.d - b.d);
+      const t0 = performance.now();
+      for (const t of todo) {
+        if (t.e) this.dropChunk(t.k, t.e);
+        this.built.set(t.k, this.buildChunk(t.k, t.wantSmall));
+        this.visData[t.k] = 1;
+        this.visDirty = true;
+        if (performance.now() - t0 > 5) break;
+      }
+    }
+    if (this.frame % 30 === 0) {
+      for (const [k, e] of this.built) {
+        const i = k % NCH;
+        const j = Math.floor(k / NCH);
+        const d = Math.hypot((i + 0.5) * CHUNK - WORLD_HALF - cx, (j + 0.5) * CHUNK - WORLD_HALF - cz);
+        if (d > R + CHUNK * 2.2) this.dropChunk(k, e);
+        else if (e.small && d > this.smallDetail + CHUNK * 1.6) {
+          this.group.remove(e.small);
+          e.small.geometry.dispose();
+          e.small = null;
+        }
+      }
+    }
+    if (this.visDirty) {
+      this.visDirty = false;
+      this.visTex.needsUpdate = true;
+    }
+    if (this.silDirty) {
+      this.silDirty = false;
+      this.buildSilhouettes();
     }
     for (const a of this.animated) {
+      if (Math.abs(a.x - cx) + Math.abs(a.z - cz) > 900) {
+        if (a.obj) a.obj.visible = false;
+        continue;
+      }
+      if (a.obj) a.obj.visible = true;
       if (a.type === 'blades') a.obj.rotation.z += dt * 0.6;
       else if (a.type === 'dish') a.obj.rotation.y += dt * a.speed;
       else if (a.type === 'blink') a.obj.material.opacity = Math.sin(time * 3 + a.phase) > 0.2 ? 1 : 0.15;
@@ -500,9 +705,8 @@ export class StructureMesh {
     if (this.lightTimer <= 0) {
       this.lightTimer = 0.5;
       if (night > 0.2 && this.lightPool.length) {
-        const lights = this.world.lights;
         const near = [];
-        for (const L of lights) {
+        for (const L of this.world.lights) {
           const d = (L.x - cx) * (L.x - cx) + (L.z - cz) * (L.z - cz);
           if (d < 160 * 160) near.push({ L, d });
         }
@@ -520,3 +724,5 @@ export class StructureMesh {
     }
   }
 }
+
+const FLAG_COLORS = { 0: 0xe8e8e8, 1: 0x3a6bbd, 2: 0xb3302a, 3: 0xd69a2e };

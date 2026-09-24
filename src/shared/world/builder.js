@@ -9,7 +9,7 @@ export const BF = {
   RENDER: 2,
   COVER: 4, // generates AI cover points along the sides
   SMALL: 8, // small detail: rendered only at short range
-  WALKSURF: 16, // walkable surface over water (docks, bridges)
+  WALKSURF: 16, // walkable surface the AI may cross (docks, bridges, stairs)
   NOSHADOW: 32,
   RANGE_TARGET: 64,
   BUILDING: 128, // part of an enterable/solid building (for AI & audio occlusion)
@@ -27,6 +27,9 @@ export class Builder {
     this.flags = []; // sector/base flag poles {key,x,y,z}
     this.markers = []; // named interaction/zone points {type,x,y,z,r,data}
     this.rangeTargets = [];
+    this.zones = []; // access-controlled areas {name, level, x0,z0,x1,z1,y0,y1, ...}
+    this.buildings = []; // building groups {id, kind, x0,z0,x1,z1,y1, destructible}
+    this.cur = null; // building currently being emitted
     this.frames = [];
     this.ox = 0;
     this.oy = 0;
@@ -102,6 +105,17 @@ export class Builder {
     const y1 = this.oy + Math.max(ly0, ly1);
     if (x1 - x0 < 0.01 || y1 - y0 < 0.01 || z1 - z0 < 0.01) return null;
     const bx = { x0, y0, z0, x1, y1, z1, m, f };
+    if (this.cur) {
+      bx.bid = this.cur.id;
+      const c = this.cur;
+      if (x0 < c.x0) c.x0 = x0;
+      if (z0 < c.z0) c.z0 = z0;
+      if (x1 > c.x1) c.x1 = x1;
+      if (z1 > c.z1) c.z1 = z1;
+      if (y1 > c.y1) c.y1 = y1;
+      if (y0 < c.y0) c.y0 = y0;
+      c.boxes++;
+    }
     this.boxes.push(bx);
     return bx;
   }
@@ -129,6 +143,32 @@ export class Builder {
   light(lx, ly, lz, r = 14, color = 0xffe2b0) {
     const [x, z] = this.toWorld(lx, lz);
     this.lights.push({ x, y: this.oy + ly, z, r, color });
+  }
+
+  // Group everything emitted by fn() into one building (far LOD, destruction).
+  building(kind, fn, opts = {}) {
+    if (this.cur) return fn(this); // nested prefabs belong to the outer building
+    const b = { id: this.buildings.length + 1, kind, x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity, y0: Infinity, y1: -Infinity, boxes: 0, destructible: opts.destructible !== false, m: opts.m ?? -1, name: opts.name || '' };
+    this.cur = b;
+    try {
+      fn(this);
+    } finally {
+      this.cur = null;
+    }
+    if (b.boxes) this.buildings.push(b);
+    return b;
+  }
+
+  // Access-controlled area in local coordinates (level: clearance required).
+  zone(name, level, lx0, lz0, lx1, lz1, ly0 = -1, ly1 = 6, data = {}) {
+    const a = this.toWorld(lx0, lz0);
+    const c = this.toWorld(lx1, lz1);
+    const z = {
+      name, level, x0: Math.min(a[0], c[0]), z0: Math.min(a[1], c[1]), x1: Math.max(a[0], c[0]), z1: Math.max(a[1], c[1]),
+      y0: this.oy + ly0, y1: this.oy + ly1, ...data,
+    };
+    this.zones.push(z);
+    return z;
   }
 
   marker(type, lx, ly, lz, r = 4, data = {}) {
@@ -193,11 +233,11 @@ export class Builder {
       if (axis === 'z') {
         const za = z0 + (z1 - z0) * t0;
         const zb = z0 + (z1 - z0) * t1;
-        this.box(x0 - width / 2, yBottom, Math.min(za, zb), x0 + width / 2, yy, Math.max(za, zb), m, DEFAULT | BF.BUILDING);
+        this.box(x0 - width / 2, yBottom, Math.min(za, zb), x0 + width / 2, yy, Math.max(za, zb), m, DEFAULT | BF.BUILDING | BF.WALKSURF);
       } else {
         const xa = x0 + (x1 - x0) * t0;
         const xb = x0 + (x1 - x0) * t1;
-        this.box(Math.min(xa, xb), yBottom, z0 - width / 2, Math.max(xa, xb), yy, z0 + width / 2, m, DEFAULT | BF.BUILDING);
+        this.box(Math.min(xa, xb), yBottom, z0 - width / 2, Math.max(xa, xb), yy, z0 + width / 2, m, DEFAULT | BF.BUILDING | BF.WALKSURF);
       }
     }
   }

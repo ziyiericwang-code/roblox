@@ -4,46 +4,97 @@ export const GAME_NAME = 'Frontline Command';
 export const PROTOCOL_VERSION = 3;
 
 export const WORLD_SEED = 1947;
-export const WORLD_HALF = 800; // world spans [-800, 800] metres on x and z
+export const WORLD_HALF = 3072; // world spans [-3072, 3072] metres on x and z (6.1 km)
 export const SEA_LEVEL = 0;
 
 export const TICK_RATE = 20; // simulation ticks per second
 export const TICK_DT = 1 / TICK_RATE;
 export const SNAPSHOT_RATE = 20;
-export const INTEREST_RADIUS = 420; // metres; entities beyond this are not replicated
+export const INTEREST_RADIUS = 480; // metres; entities beyond this are not replicated (vehicles: further)
 
+// Countries. Every country fields an army of players and NPCs; wars between
+// pairs of countries start and end over time (see WarSystem).
 export const FACTION = {
   NONE: 0,
-  COALITION: 1, // player army
-  DOMINION: 2, // opposing army (AI)
+  ALDMARK: 1,
+  KARSA: 2,
+  SERAVIA: 3,
 };
+export const COUNTRY_IDS = [FACTION.ALDMARK, FACTION.KARSA, FACTION.SERAVIA];
 
 export const FACTION_INFO = {
-  [FACTION.COALITION]: {
-    id: FACTION.COALITION,
-    key: 'coalition',
-    name: 'Allied Coalition',
-    short: 'Coalition',
-    color: '#5b8fd6',
-    hq: 'hq_coalition',
+  [FACTION.ALDMARK]: {
+    id: FACTION.ALDMARK,
+    key: 'aldmark',
+    name: 'Republic of Aldmark',
+    short: 'Aldmark',
+    adj: 'Aldmarkian',
+    army: 'Aldmark Defence Force',
+    color: '#4f86d9',
+    dark: '#23406b',
+    hq: 'hq_aldmark',
+    capital: 'aldhaven',
+    motto: 'Steadfast in the north wind.',
+    blurb: 'Temperate west and north: forests, the Greymoor highlands and the port of Wexley.',
   },
-  [FACTION.DOMINION]: {
-    id: FACTION.DOMINION,
-    key: 'dominion',
-    name: 'Iron Dominion',
-    short: 'Dominion',
-    color: '#d0493f',
-    hq: 'hq_dominion',
+  [FACTION.KARSA]: {
+    id: FACTION.KARSA,
+    key: 'karsa',
+    name: 'Karsan Federation',
+    short: 'Karsa',
+    adj: 'Karsan',
+    army: 'Karsan Army',
+    color: '#d24a3c',
+    dark: '#6b231d',
+    hq: 'hq_karsa',
+    capital: 'kharan',
+    motto: 'Iron, sand and will.',
+    blurb: 'The industrial and military east: mountains, canyons and the Ashar desert.',
   },
-  [FACTION.NONE]: { id: 0, key: 'neutral', name: 'Neutral', short: 'Neutral', color: '#a0a0a0' },
+  [FACTION.SERAVIA]: {
+    id: FACTION.SERAVIA,
+    key: 'seravia',
+    name: 'Seravian Union',
+    short: 'Seravia',
+    adj: 'Seravian',
+    army: 'Seravian Guard',
+    color: '#e0a33a',
+    dark: '#6e4d17',
+    hq: 'hq_seravia',
+    capital: 'seralis',
+    motto: 'The sea remembers.',
+    blurb: 'The fertile south: lake Mera, farmland, the coast and the islands.',
+  },
+  [FACTION.NONE]: { id: 0, key: 'neutral', name: 'Neutral', short: 'Neutral', adj: 'Neutral', army: '', color: '#a0a0a0', dark: '#555555' },
 };
 
-export function enemyOf(faction) {
-  return faction === FACTION.COALITION ? FACTION.DOMINION : faction === FACTION.DOMINION ? FACTION.COALITION : FACTION.NONE;
+// ---------------------------------------------------------------- hostility
+// Which countries are currently at war. Owned by the WarSystem on the server
+// and mirrored from the war state on clients. Default: no wars.
+const WAR_MASK = new Uint8Array(4); // bit f set in WAR_MASK[g] when g and f are at war
+
+export function setWars(pairs) {
+  WAR_MASK.fill(0);
+  for (const [a, b] of pairs) {
+    WAR_MASK[a] |= 1 << b;
+    WAR_MASK[b] |= 1 << a;
+  }
 }
 
 export function areHostile(a, b) {
-  return a !== FACTION.NONE && b !== FACTION.NONE && a !== b;
+  return a > 0 && b > 0 && a !== b && (WAR_MASK[a] & (1 << b)) !== 0;
+}
+
+// Countries at war with `f`.
+export function enemiesOf(f) {
+  const out = [];
+  for (const g of COUNTRY_IDS) if (areHostile(f, g)) out.push(g);
+  return out;
+}
+
+// Main enemy (first country at war with f), or NONE.
+export function enemyOf(f) {
+  return enemiesOf(f)[0] || FACTION.NONE;
 }
 
 export const STANCE = { STAND: 0, CROUCH: 1, PRONE: 2 };

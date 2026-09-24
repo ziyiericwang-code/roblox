@@ -160,7 +160,7 @@ export function buildWater() {
     },
   ]);
   const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: waterVert, fragmentShader: waterFrag, transparent: true, fog: true, depthWrite: false });
-  const geo = new THREE.PlaneGeometry(8000, 8000, 1, 1);
+  const geo = new THREE.PlaneGeometry(20000, 20000, 1, 1);
   geo.rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = SEA_LEVEL;
