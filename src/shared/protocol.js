@@ -28,6 +28,11 @@ export const MSG = {
   TRAINING: 'training',
   PING: 'ping',
   REQUEST: 'req', // request a state resync (profile, war...)
+  ENLIST: 'enlist', // choose / change country {country}
+  PROMOTE: 'promote', // accept a promotion {to}
+  MAPCMD: 'mapcmd', // strategic world-map command {cmd, target, from}
+  TALK: 'talk', // interact with an NPC {id}
+  ADMIN: 'admin', // sandbox / admin command (server checks permission)
   // server -> client
   WELCOME: 'welcome',
   REJECT: 'reject',
@@ -50,10 +55,14 @@ export const MSG = {
   NOTICE: 'notice',
   LOADOUT: 'loadout',
   KICK: 'kick',
+  BUILDINGS: 'bld', // building destruction states [[id, state], ...]
+  PERF: 'perf', // developer performance monitor (admins only)
+  ADMINSTATE: 'adminstate',
+  DIALOG: 'dialog', // NPC conversation
 };
 
 // ------------------------------------------------------------------ snapshot
-const POS_SCALE = 20; // 5 cm precision, +-1638 m range
+const POS_SCALE = 10; // 10 cm precision, +-3276 m range (the world is +-3072 m)
 const YAW_SCALE = 65535 / (Math.PI * 2);
 
 export const SNAP = { HEADER: 9 };
@@ -230,7 +239,7 @@ export const V = {
   str(v, max = 64) {
     return typeof v === 'string' && v.length <= max;
   },
-  vec(v, lim = 2000) {
+  vec(v, lim = 3500) {
     return Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x) && Math.abs(x) <= lim);
   },
   bool(v) {

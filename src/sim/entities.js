@@ -7,9 +7,15 @@ const HISTORY = 24; // ~1.2 s at 20 Hz for lag compensation
 
 export class Soldier {
   constructor(id, opts) {
+    this.init(id, opts);
+  }
+
+  // (Re)initialise. NPC soldiers are pooled: a despawned NPC's object is
+  // reused for the next spawn instead of allocating a new one.
+  init(id, opts) {
     this.id = id;
     this.k = ENTITY.SOLDIER;
-    this.faction = opts.faction ?? FACTION.COALITION;
+    this.faction = opts.faction ?? FACTION.NONE;
     this.name = opts.name || 'Soldier';
     this.rank = opts.rank ?? 1;
     this.role = opts.role || 'rifleman';
@@ -39,7 +45,8 @@ export class Soldier {
     this.lastDamageAt = -99;
     this.lastFireAt = -99;
     this.lastShotSeq = 0;
-    this.damagers = new Map(); // attackerId -> {dmg, t}
+    if (this.damagers) this.damagers.clear();
+    else this.damagers = new Map(); // attackerId -> {dmg, t}
     this.weapons = (opts.weapons || ['ar7', 'p9']).map((id) => makeWeaponState(id, opts.grenadeBonus));
     this.slot = 0;
     this.switchUntil = 0;
@@ -61,7 +68,7 @@ export class Soldier {
     this.captive = !!opts.captive;
     this.npc = null; // AI brain for NPCs
     this.spawnTime = 0;
-    this.history = new Array(HISTORY);
+    if (!this.history) this.history = new Array(HISTORY);
     this.histIdx = 0;
     this.histCount = 0;
     this.infoVersion = 1;
@@ -70,6 +77,13 @@ export class Soldier {
     this.action = null; // timed action in progress
     this.nextAmmoBagAt = 0;
     this.nextSpotAt = 0;
+    this.staff = 0; // hierarchy post id for base staff
+    this.title = '';
+    this.combatReady = false;
+    this.lastMoveT = 0;
+    this.airTime = 0;
+    this.spawnTime = 0;
+    return this;
   }
 
   get alive() {
@@ -145,7 +159,7 @@ export class Vehicle {
     this.k = ENTITY.VEHICLE;
     this.type = type;
     this.def = VEHICLES[type];
-    this.faction = opts.faction ?? FACTION.COALITION;
+    this.faction = opts.faction ?? FACTION.NONE;
     this.x = opts.x || 0;
     this.y = opts.y || 0;
     this.z = opts.z || 0;

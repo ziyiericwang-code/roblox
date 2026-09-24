@@ -72,7 +72,7 @@ export class FakeConn {
   }
 }
 
-export async function connect(game, id, name = 'Tester', token = 'token-token-token-1234') {
+export async function connect(game, id, name = 'Tester', token = 'token-token-token-1234', country = 1) {
   if (id.length < 8) id = `${id}_player`; // profile ids must be 8-48 chars
   const conn = new FakeConn();
   const session = game.addConnection(conn);
@@ -80,6 +80,7 @@ export async function connect(game, id, name = 'Tester', token = 'token-token-to
   // wait for async hello
   for (let i = 0; i < 50 && !session.profile; i++) await new Promise((r) => setTimeout(r, 2));
   if (!session.profile) throw new Error(`hello failed for ${id}: ${JSON.stringify(conn.last('reject'))}`);
+  if (country && !session.faction) conn.deliver({ t: 'enlist', country });
   return { conn, session };
 }
 

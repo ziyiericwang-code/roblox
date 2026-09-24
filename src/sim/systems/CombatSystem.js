@@ -206,6 +206,7 @@ export class CombatSystem {
     const g = this.game;
     if (target.life === LIFE.DEAD || amount <= 0) return;
     if (target.invulnerableUntil > g.time) return;
+    if (target.player && target.player.god) return;
     if (attacker && attacker.id === target.id && !opts.explosive) return;
     if (target.ambient && !target.combatReady) return;
     const selfHit = attacker && attacker.id === target.id;
@@ -241,7 +242,7 @@ export class CombatSystem {
     }
     if (!killed) return;
     const overkill = -target.health;
-    const canDown = !opts.noDown && !target.ambient && (target.isPlayer || (target.faction === FACTION.COALITION && target.npc && !target.npc.vip)) && !target.swimming && !target.vehicle;
+    const canDown = !opts.noDown && !target.ambient && (target.isPlayer || (target.npc && !target.npc.vip && g.playersOnline(target.faction) > 0)) && !target.swimming && !target.vehicle;
     const lethal = (opts.zone === ZONE.HEAD && overkill > 40) || (opts.explosive && overkill > 70) || overkill > 120;
     if (canDown && !lethal) this.down(target, attacker, attackerSession, opts);
     else this.kill(target, attacker, { ...opts, attackerSession });

@@ -2,7 +2,8 @@
 // per-player contribution; rewards scale with contribution so passengers and
 // AFK players do not profit. Outcomes feed back into the war (supply, intel,
 // captured sectors, lost territory...).
-import { FACTION, LIFE, PROP_KIND, enemyOf } from '../../shared/constants.js';
+import { LIFE, PROP_KIND, COUNTRY_IDS, FACTION_INFO, areHostile } from '../../shared/constants.js';
+import { LEGACY_RANK_MAP, RANK } from '../../shared/config/ranks.js';
 import { MISSION_TYPES, CALLSIGNS, VIP_NAMES, OPERATION_NAMES, DIFFICULTY_NAMES } from '../../shared/config/missions.js';
 import { GAME } from '../../shared/config/game.js';
 import { XP, CREDITS, LEADERSHIP } from '../../shared/config/economy.js';
@@ -10,8 +11,7 @@ import { COMMAND_POINTS } from '../../shared/config/commands.js';
 import { MSG, V } from '../../shared/protocol.js';
 import { Rng, dist2D, clamp } from '../../shared/math.js';
 
-const F = FACTION.COALITION; // missions are issued to the player army
-const E = FACTION.DOMINION;
+// Missions are issued per country (m.faction) against a specific enemy (m.enemy).
 
 export class MissionSystem {
   constructor(game) {
@@ -50,6 +50,14 @@ export class MissionSystem {
     const g = this.game;
     const T = MISSION_TYPES[type];
     const terr = p.tid ? g.world.tById[p.tid] : null;
+    const F = p.faction;
+    let E = p.enemy || 0;
+    if (!E && terr && areHostile(g.war.ownerOf(terr.id), F)) E = g.war.ownerOf(terr.id);
+    if (!E && terr) {
+      const b = g.war.battleAt(terr.id);
+      if (b) E = b.attacker === F ? b.defender : b.attacker;
+    }
+    if (!E) E = g.war.enemies(F)[0] || 0;
     const vars = { territory: terr ? terr.name : '', sector: p.sectorName || '', place: p.place || (terr ? terr.name : ''), target: p.target || '', callsign: p.callsign || '', vip: p.vip || '', minutes: p.minutes || '' };
     const difficulty = clamp(Math.round(p.difficulty ?? T.baseDifficulty + (terr && terr.value >= 2 ? 1 : 0)), 1, 5);
     const m = {
@@ -62,7 +70,9 @@ export class MissionSystem {
       z: p.z ?? (terr ? terr.z : 0),
       r: p.r ?? 45,
       difficulty,
-      recRank: Math.max(T.recRank, difficulty >= 4 ? 4 : difficulty >= 3 ? 2 : 1),
+      recRank: LEGACY_RANK_MAP[Math.max(T.recRank, difficulty >= 4 ? 4 : difficulty >= 3 ? 2 : 1)],
+      faction: F,
+      enemy: E,
       startedAt: g.time,
       endsAt: g.time + (p.time ?? T.time),
       status: 'active',
@@ -79,7 +89,7 @@ export class MissionSystem {
     m.rewards = { xp: Math.round(XP.missionBase[difficulty] * m.bonus * (m.opId ? 1.2 : 1)), credits: Math.round(CREDITS.missionBase[difficulty] * m.bonus) };
     this.missions.set(m.id, m);
     this.setup(m);
-    this.recent.set(`${type}:${m.tid}`, g.time);
+    this.recent.set(`${F}:${type}:${m.tid}`, g.time);
     // routine missions just appear in the mission list; only notable ones are radioed
     if (m.difficulty >= 3 || m.opId || m.eventId || type === 'defend') {
       g.radio(F, 'intel', 'Operations', `New mission: ${m.title} (${DIFFICULTY_NAMES[m.difficulty]}).`);
@@ -91,6 +101,8 @@ export class MissionSystem {
   setup(m) {
     const g = this.game;
     const d = m.data;
+    const F = m.faction;
+    const E = m.enemy;
     switch (m.type) {
       case 'defend': {
         g.npc.launchAssault(E, d.tid, d.sid, d.waves || 2, m.id);
@@ -176,12 +188,12 @@ export class MissionSystem {
   }
 
   // ------------------------------------------------------------------ generation
-  generate() {
+  generate(F) {
     const g = this.game;
     const war = g.war;
-    const act = this.active();
+    const act = this.active().filter((m) => m.faction === F);
     const cands = [];
-    const cool = (key, secs) => g.time - (this.recent.get(key) ?? -1e9) > secs;
+    const cool = (key, secs) => g.time - (this.recent.get(`${F}:${key}`) ?? -1e9) > secs;
     const has = (pred) => act.some(pred);
     const prio = war.priority[F] && war.priority[F].until > g.time ? war.priority[F].territory : null;
     const off = g.commands.offensiveFor(F);
@@ -193,47 +205,46 @@ export class MissionSystem {
         for (const s of w.sectors) {
           if (s.owner === F) continue;
           if (has((m) => m.type === 'capture' && m.data.tid === t.id && m.data.sid === s.id)) continue;
-          cands.push({ w: 6 * boost(t.id), make: () => this.create('capture', { tid: t.id, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.6, data: { tid: t.id, sid: s.id }, expected: 30 }) });
+          cands.push({ w: 6 * boost(t.id), make: () => this.create('capture', { faction: F, tid: t.id, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.6, data: { tid: t.id, sid: s.id }, expected: 30 }) });
         }
-        if (cool(`destroy:${t.id}`, 420) && !has((m) => m.type === 'destroy' && m.tid === t.id)) cands.push({ w: 2 * boost(t.id), make: () => this.makeDestroy(t) });
-        if (cool(`recon:${t.id}`, 600)) cands.push({ w: 1.4 * boost(t.id), make: () => this.create('recon', { tid: t.id, expected: 20 }) });
-        if (cool(`rescue:${t.id}`, 600)) cands.push({ w: 1.1, make: () => this.makeRescue(t) });
-        if (cool(`secure:${t.id}`, 300)) cands.push({ w: 1.3 * boost(t.id), make: () => this.makeSecure(t) });
-      } else if (w.owner === F) {
+        if (cool(`destroy:${t.id}`, 420) && !has((m) => m.type === 'destroy' && m.tid === t.id)) cands.push({ w: 2 * boost(t.id), make: () => this.makeDestroy(t, F) });
+        if (cool(`recon:${t.id}`, 600)) cands.push({ w: 1.4 * boost(t.id), make: () => this.create('recon', { faction: F, tid: t.id, expected: 20 }) });
+        if (cool(`rescue:${t.id}`, 600)) cands.push({ w: 1.1, make: () => this.makeRescue(t, F) });
+        if (cool(`secure:${t.id}`, 300)) cands.push({ w: 1.3 * boost(t.id), make: () => this.makeSecure(t, F) });
+      } else if (w.owner === F && b.defender === F) {
         for (const s of w.sectors) {
           if (s.owner !== F) continue;
           if (has((m) => m.type === 'defend' && m.data.tid === t.id && m.data.sid === s.id)) continue;
           if (!cool(`defend:${t.id}:${s.id}`, 180)) continue;
           cands.push({ w: 5 * boost(t.id), make: () => {
-            this.recent.set(`defend:${t.id}:${s.id}`, g.time);
-            return this.create('defend', { tid: t.id, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.8, data: { tid: t.id, sid: s.id, waves: 2 }, expected: 25 });
+            this.recent.set(`${F}:defend:${t.id}:${s.id}`, g.time);
+            return this.create('defend', { faction: F, enemy: b.attacker, tid: t.id, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.8, data: { tid: t.id, sid: s.id, waves: 2 }, expected: 25 });
           } });
           if (/Bridge/.test(s.def.name) && cool(`hold:${t.id}`, 400)) {
-            cands.push({ w: 2.5, make: () => this.create('hold', { tid: t.id, place: s.def.name, title: 'Hold the Bridge', x: s.def.x, z: s.def.z, r: 32, minutes: 3, data: { need: 180 }, expected: 30 }) });
+            cands.push({ w: 2.5, make: () => this.create('hold', { faction: F, enemy: b.attacker, tid: t.id, place: s.def.name, title: 'Hold the Bridge', x: s.def.x, z: s.def.z, r: 32, minutes: 3, data: { need: 180 }, expected: 30 }) });
           }
         }
-        if (cool(`vip:${t.id}`, 900)) cands.push({ w: 0.9, make: () => this.makeVip(t) });
+        if (cool(`vip:${t.id}`, 900)) cands.push({ w: 0.9, make: () => this.makeVip(t, F) });
       }
     }
     // logistics for friendly front territories
     for (const w of war.map.values()) {
       const t = w.def;
-      if (t.isBase || w.owner !== F) continue;
-      const frontline = t.adjacent.some((a) => war.ownerOf(a) === E);
-      if (!frontline) continue;
-      if (w.supply < 65 && cool(`supply:${t.id}`, 420) && !has((m) => m.type === 'supply')) cands.push({ w: 2.2 * (w.supply < 30 ? 2 : 1), make: () => this.makeSupply(t) });
-      if (cool(`convoy:${t.id}`, 700) && !has((m) => m.type === 'convoy')) cands.push({ w: 1.2, make: () => this.makeConvoy(t) });
+      if (w.isBase || w.owner !== F) continue;
+      if (!war.frontFor(t.id, F)) continue;
+      if (w.supply < 65 && cool(`supply:${t.id}`, 420) && !has((m) => m.type === 'supply')) cands.push({ w: 2.2 * (w.supply < 30 ? 2 : 1), make: () => this.makeSupply(t, F) });
+      if (cool(`convoy:${t.id}`, 700) && !has((m) => m.type === 'convoy')) cands.push({ w: 1.2, make: () => this.makeConvoy(t, F) });
     }
     // enemy front territories without an active battle: scouting and sabotage
     for (const w of war.map.values()) {
       const t = w.def;
       if (!war.isFront(t.id, F)) continue;
-      if ([...war.battles.values()].some((b) => b.territory === t.id)) continue;
-      if (cool(`recon:${t.id}`, 700)) cands.push({ w: 0.8 * boost(t.id), make: () => this.create('recon', { tid: t.id, expected: 20 }) });
-      if (cool(`destroy:${t.id}`, 700)) cands.push({ w: 0.6 * boost(t.id), make: () => this.makeDestroy(t) });
+      if (war.battleAt(t.id)) continue;
+      if (cool(`recon:${t.id}`, 700)) cands.push({ w: 0.8 * boost(t.id), make: () => this.create('recon', { faction: F, tid: t.id, expected: 20 }) });
+      if (cool(`destroy:${t.id}`, 700)) cands.push({ w: 0.6 * boost(t.id), make: () => this.makeDestroy(t, F) });
       for (const s of w.sectors) {
         if (s.owner === F || has((m) => m.type === 'capture' && m.data.sid === s.id && m.data.tid === t.id)) continue;
-        cands.push({ w: 0.7 * boost(t.id), make: () => this.create('capture', { tid: t.id, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.6, data: { tid: t.id, sid: s.id }, expected: 30 }) });
+        cands.push({ w: 0.7 * boost(t.id), make: () => this.create('capture', { faction: F, tid: t.id, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.6, data: { tid: t.id, sid: s.id }, expected: 30 }) });
       }
     }
     if (!cands.length) return null;
@@ -241,52 +252,52 @@ export class MissionSystem {
     return pick ? pick.make() : null;
   }
 
-  makeDestroy(t) {
+  makeDestroy(t, F) {
     const g = this.game;
     const name = this.rng.pick(MISSION_TYPES.destroy.targets);
     // somewhere near the territory, off the sector flags
     const a = this.rng.float(0, Math.PI * 2);
     let p = { x: t.x + Math.cos(a) * t.radius * 0.6, z: t.z + Math.sin(a) * t.radius * 0.6 };
     if (g.world.nav) p = g.world.nav.randomPointNear(p.x, p.z, 25, () => this.rng.next());
-    return this.create('destroy', { tid: t.id, target: name, x: p.x, z: p.z, r: 40, data: { targetName: name, count: name === 'Fuel Depot' ? 2 : 1 }, expected: 25, difficulty: 3 });
+    return this.create('destroy', { faction: F, tid: t.id, target: name, x: p.x, z: p.z, r: 40, data: { targetName: name, count: name === 'Fuel Depot' ? 2 : 1 }, expected: 25, difficulty: 3 });
   }
 
-  makeRescue(t) {
+  makeRescue(t, F) {
     const g = this.game;
     const s = this.rng.pick(t.sectors);
     let p = { x: s.x + this.rng.float(-50, 50), z: s.z + this.rng.float(-50, 50) };
     if (g.world.nav) p = g.world.nav.randomPointNear(p.x, p.z, 20, () => this.rng.next());
-    return this.create('rescue', { tid: t.id, sectorName: s.name, callsign: this.rng.pick(CALLSIGNS), x: p.x, z: p.z, r: 40, expected: 25 });
+    return this.create('rescue', { faction: F, tid: t.id, sectorName: s.name, callsign: this.rng.pick(CALLSIGNS), x: p.x, z: p.z, r: 40, expected: 25 });
   }
 
-  makeSecure(t) {
+  makeSecure(t, F) {
     const g = this.game;
     const a = this.rng.float(0, Math.PI * 2);
     let p = { x: t.x + Math.cos(a) * t.radius * 0.5, z: t.z + Math.sin(a) * t.radius * 0.5 };
     if (g.world.nav) p = g.world.nav.randomPointNear(p.x, p.z, 20, () => this.rng.next());
     const place = `${this.rng.pick(['the Crossroads', 'the Ridge Line', 'the Outskirts', 'the Old Quarter', 'the Tree Line', 'the Depot'])}, ${t.name}`;
-    return this.create('secure', { tid: t.id, place, x: p.x, z: p.z, r: 45, expected: 22 });
+    return this.create('secure', { faction: F, tid: t.id, place, x: p.x, z: p.z, r: 45, expected: 22 });
   }
 
-  makeSupply(t) {
+  makeSupply(t, F) {
     const cp = t.commandPost;
-    return this.create('supply', { tid: t.id, x: cp.x, z: cp.z, r: 20, data: { need: 3, dest: { x: cp.x, z: cp.z }, tid: t.id }, expected: 18, difficulty: 1 });
+    return this.create('supply', { faction: F, tid: t.id, x: cp.x, z: cp.z, r: 20, data: { need: 3, dest: { x: cp.x, z: cp.z }, tid: t.id }, expected: 18, difficulty: 1 });
   }
 
-  makeConvoy(t) {
+  makeConvoy(t, F) {
     const g = this.game;
-    const route = g.world.routeBetween('hq_coalition', t.id);
+    const route = g.world.routeBetween(FACTION_INFO[F].hq, t.id);
     if (!route || route.length < 5) return null;
-    return this.create('convoy', { tid: t.id, x: route[route.length - 1].x, z: route[route.length - 1].z, r: 40, data: { route, tid: t.id }, expected: 20 });
+    return this.create('convoy', { faction: F, tid: t.id, x: route[route.length - 1].x, z: route[route.length - 1].z, r: 40, data: { route, tid: t.id }, expected: 20 });
   }
 
-  makeVip(t) {
+  makeVip(t, F) {
     const g = this.game;
     const base = g.world.bases[F];
     const start = { x: base.spawns[0].x, z: base.spawns[0].z };
     const dest = { x: t.commandPost.x, z: t.commandPost.z };
     const vip = this.rng.pick(VIP_NAMES);
-    return this.create('vip', { tid: t.id, vip, vipName: `Col. ${vip}`, x: dest.x, z: dest.z, r: 30, data: { start, dest, vipName: `Col. ${vip}` }, expected: 25 });
+    return this.create('vip', { faction: F, tid: t.id, vip, vipName: `Col. ${vip}`, x: dest.x, z: dest.z, r: 30, data: { start, dest, vipName: `Col. ${vip}` }, expected: 25 });
   }
 
   // ------------------------------------------------------------------ update
@@ -295,8 +306,11 @@ export class MissionSystem {
     this.genTimer -= dt;
     if (this.genTimer <= 0) {
       this.genTimer = 8;
-      const n = this.active().length;
-      if (n < GAME.missionTarget) this.generate();
+      for (const f of COUNTRY_IDS) {
+        if (!g.playersOnline(f) || !g.war.enemies(f).length) continue;
+        const n = this.active().filter((m) => m.faction === f).length;
+        if (n < GAME.missionTarget) this.generate(f);
+      }
       // cleanup finished missions after a short display period
       for (const [id, m] of this.missions) {
         if (m.status !== 'active' && g.time - m.endedAt > 20) {
@@ -311,7 +325,7 @@ export class MissionSystem {
     }
     for (const op of this.operations.values()) {
       if (op.status !== 'active') continue;
-      if (g.war.ownerOf(op.tid) === F) this.finishOperation(op, true);
+      if (g.war.ownerOf(op.tid) === op.faction) this.finishOperation(op, true);
       else if (g.time > op.endsAt) this.finishOperation(op, false);
     }
   }
@@ -320,19 +334,21 @@ export class MissionSystem {
     const g = this.game;
     const d = m.data;
     const war = g.war;
+    const F = m.faction;
+    const hostile = (s) => areHostile(s.faction, F);
     switch (m.type) {
       case 'capture': {
         const w = war.get(d.tid);
         const s = w && w.sectors.find((x) => x.id === d.sid);
         if (!s) return this.finish(m, false, 'Objective no longer valid');
-        m.progress = `${Math.round(Math.max(0, s.progress))}%`;
+        m.progress = `${Math.round(s.owner === F ? 100 : s.owner ? 100 - s.p : s.cap === F ? s.p : 0)}%`;
         if (s.owner === F) this.finish(m, true, 'Objective captured');
         break;
       }
       case 'defend': {
         const w = war.get(d.tid);
         const s = w && w.sectors.find((x) => x.id === d.sid);
-        if (!s || s.owner === E) return this.finish(m, false, 'Position overrun');
+        if (!s || (s.owner && s.owner !== F)) return this.finish(m, false, 'Position overrun');
         m.progress = `${Math.max(0, Math.round(m.endsAt - g.time))}s`;
         break;
       }
@@ -389,12 +405,12 @@ export class MissionSystem {
         break;
       }
       case 'secure': {
-        const hostile = g.soldiersNear(m.x, m.z, m.r, (s) => s.faction === E && s.life === LIFE.ALIVE).length;
+        const nHostile = g.soldiersNear(m.x, m.z, m.r, (s) => hostile(s) && s.life === LIFE.ALIVE).length;
         const friendlyPlayers = g.soldiersNear(m.x, m.z, m.r, (s) => s.player && s.faction === F && s.life === LIFE.ALIVE);
         if (friendlyPlayers.length) d.touched = true;
         for (const s of friendlyPlayers) if (g.tickCount % 40 === 0) this.contribute(m, s.player, 1);
-        m.progress = `${hostile} hostiles`;
-        if (d.touched && hostile === 0) {
+        m.progress = `${nHostile} hostiles`;
+        if (d.touched && nHostile === 0) {
           d.clearFor += dt;
           if (d.clearFor > 6) this.finish(m, true, 'Area secured');
         } else d.clearFor = 0;
@@ -402,7 +418,7 @@ export class MissionSystem {
       }
       case 'hold': {
         const fr = g.soldiersNear(m.x, m.z, m.r, (s) => s.faction === F && s.life === LIFE.ALIVE && !s.ambient);
-        const en = g.soldiersNear(m.x, m.z, m.r, (s) => s.faction === E && s.life === LIFE.ALIVE);
+        const en = g.soldiersNear(m.x, m.z, m.r, (s) => hostile(s) && s.life === LIFE.ALIVE);
         const players = fr.filter((s) => s.player);
         if (players.length && fr.length >= en.length) {
           d.held += dt;
@@ -411,7 +427,7 @@ export class MissionSystem {
         if (g.time >= d.nextWave) {
           d.nextWave = g.time + 70;
           const a = this.rng.float(0, Math.PI * 2);
-          g.npc.spawnSquad(E, m.x + Math.cos(a) * 140, m.z + Math.sin(a) * 140, { type: 'attack', x: m.x, z: m.z, r: 20 }, { size: 5, mission: m.id, special: true });
+          g.npc.spawnSquad(m.enemy, m.x + Math.cos(a) * 140, m.z + Math.sin(a) * 140, { type: 'attack', x: m.x, z: m.z, r: 20 }, { size: 5, mission: m.id, special: true });
         }
         m.progress = `${Math.floor(d.held)}/${d.need}s`;
         if (d.held >= d.need) this.finish(m, true, 'Position held');
@@ -484,6 +500,7 @@ export class MissionSystem {
 
   delivered(m, session, n) {
     const g = this.game;
+    const F = m.faction;
     m.data.delivered += n;
     g.war.addSupply(m.data.tid, 15 * n, F);
     g.war.cp[F] = Math.min(g.war.cpMax(F), g.war.cp[F] + COMMAND_POINTS.perSupplyDelivered * n);
@@ -495,6 +512,7 @@ export class MissionSystem {
   }
 
   timeout(m) {
+    const F = m.faction;
     if (m.type === 'defend') {
       const w = this.game.war.get(m.data.tid);
       const s = w && w.sectors.find((x) => x.id === m.data.sid);
@@ -506,6 +524,7 @@ export class MissionSystem {
 
   finish(m, success, result) {
     const g = this.game;
+    const F = m.faction;
     if (m.status !== 'active') return;
     m.status = success ? 'success' : 'failed';
     m.result = result;
@@ -572,9 +591,9 @@ export class MissionSystem {
 
   // ------------------------------------------------------------------ hooks
   onPlayerAction(session, kind, amount, pos) {
-    if (!pos || session.faction !== F) return;
+    if (!pos) return;
     for (const m of this.missions.values()) {
-      if (m.status !== 'active') continue;
+      if (m.status !== 'active' || m.faction !== session.faction) continue;
       if (dist2D(pos.x, pos.z, m.x, m.z) <= m.r * 1.5) this.contribute(m, session, amount);
     }
     void kind;
@@ -593,7 +612,7 @@ export class MissionSystem {
     // missions tied to a territory that changed hands resolve naturally in update;
     // capture missions for a lost territory are cancelled.
     for (const m of this.active()) {
-      if (m.tid === w.id && (m.type === 'capture' || m.type === 'recon' || m.type === 'destroy') && w.owner === F) {
+      if (m.tid === w.id && (m.type === 'capture' || m.type === 'recon' || m.type === 'destroy') && w.owner === m.faction) {
         if (m.type === 'capture') this.finish(m, true, 'Territory liberated');
       }
     }
@@ -640,8 +659,7 @@ export class MissionSystem {
 
   launchOperation(f, tid, session) {
     const g = this.game;
-    if (f !== F) return false;
-    if ([...this.operations.values()].some((o) => o.status === 'active')) return false;
+    if ([...this.operations.values()].some((o) => o.status === 'active' && o.faction === f)) return false;
     if (!g.war.isFront(tid, f)) return false;
     const w = g.war.get(tid);
     const op = {
@@ -652,10 +670,10 @@ export class MissionSystem {
     g.war.forceBattle(tid, f);
     for (const s of w.sectors) {
       if (s.owner === f) continue;
-      const m = this.create('capture', { tid, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.6, data: { tid, sid: s.id }, opId: op.id, time: 900, expected: 30, bonus: 1.2 });
+      const m = this.create('capture', { faction: f, tid, sectorName: s.def.name, x: s.def.x, z: s.def.z, r: s.def.r * 1.6, data: { tid, sid: s.id }, opId: op.id, time: 900, expected: 30, bonus: 1.2 });
       op.missions.push(m.id);
     }
-    const dm = this.makeDestroy(w.def);
+    const dm = this.makeDestroy(w.def, f);
     if (dm) {
       dm.opId = op.id;
       op.missions.push(dm.id);
@@ -668,6 +686,7 @@ export class MissionSystem {
 
   finishOperation(op, success) {
     const g = this.game;
+    const F = op.faction;
     op.status = success ? 'success' : 'failed';
     const t = g.world.tById[op.tid];
     if (success) {
@@ -693,6 +712,94 @@ export class MissionSystem {
     this.changed();
   }
 
+  // ------------------------------------------------------------------ assignments
+  // A rank-appropriate assignment: privates get objectives near the fighting,
+  // NCOs get harder squad missions, officers get battles to direct.
+  pickAssignment(session) {
+    const g = this.game;
+    const f = session.faction;
+    const s = session.soldier;
+    const pos = s || g.world.bases[f];
+    const rank = session.rankIndex;
+    const list = this.active().filter((m) => m.faction === f && m.id !== session.declinedOffer);
+    if (!list.length) return null;
+    const score = (m) => {
+      let v = -dist2D(pos.x, pos.z, m.x, m.z) / 400;
+      if (rank < RANK.CORPORAL) v += m.difficulty <= 2 ? 2 : 0;
+      else if (rank < RANK.WO1) v += m.difficulty >= 3 ? 2 : 0.5;
+      else v += (m.opId ? 4 : 0) + (m.type === 'capture' || m.type === 'defend' ? 1.5 : 0);
+      if (m.eventId) v += 1;
+      return v;
+    };
+    return list.sort((a, b) => score(b) - score(a))[0];
+  }
+
+  describe(m, session) {
+    const g = this.game;
+    const s = session.soldier;
+    const t = m.tid ? g.world.tById[m.tid] : null;
+    const km = s ? (dist2D(s.x, s.z, m.x, m.z) / 1000).toFixed(1) : null;
+    const where = t ? t.name : 'the marked area';
+    return `${m.title.toUpperCase()} — ${m.brief} Location: ${where}${km ? `, ${km} km away` : ''}.`;
+  }
+
+  recommend(session) {
+    const m = this.pickAssignment(session);
+    return m ? this.describe(m, session) : null;
+  }
+
+  offerFor(session) {
+    const m = this.pickAssignment(session);
+    if (!m) return null;
+    session.offer = m.id;
+    return this.describe(m, session);
+  }
+
+  acceptOffer(session) {
+    const g = this.game;
+    const m = session.offer ? this.get(session.offer) : null;
+    session.offer = 0;
+    if (!m || m.status !== 'active') return false;
+    session.trackedMission = m.id;
+    this.contribute(m, session, 1);
+    g.emit(['assignment', m.id, m.title], { to: session });
+    g.notify(session, `Assignment: ${m.title}. Travel there — vehicles are in the motor pool.`, 'good');
+    this.changed();
+    return true;
+  }
+
+  // Admin sandbox: start a mission of a given kind near the player.
+  debugStart(session, kind) {
+    const g = this.game;
+    const f = session.faction;
+    const s = session.soldier;
+    if (!s || !MISSION_TYPES[kind]) return null;
+    const near = [...g.war.map.values()].filter((w) => !w.isBase).sort((a, b) => dist2D(a.def.x, a.def.z, s.x, s.z) - dist2D(b.def.x, b.def.z, s.x, s.z));
+    const own = near.find((w) => w.owner === f);
+    const foe = near.find((w) => g.war.atWar(w.owner, f)) || near.find((w) => w.owner !== f);
+    switch (kind) {
+      case 'destroy': return foe ? this.makeDestroy(foe.def, f) : null;
+      case 'rescue': return foe ? this.makeRescue(foe.def, f) : null;
+      case 'secure': return this.makeSecure((foe || own).def, f);
+      case 'supply': return own ? this.makeSupply(own.def, f) : null;
+      case 'convoy': return own ? this.makeConvoy(own.def, f) : null;
+      case 'vip': return own ? this.makeVip(own.def, f) : null;
+      case 'recon': return foe ? this.create('recon', { faction: f, tid: foe.id, expected: 20 }) : null;
+      case 'hold': return this.create('hold', { faction: f, tid: null, title: 'Hold This Position', x: s.x, z: s.z, r: 30, data: { need: 120 }, expected: 20 });
+      case 'capture': {
+        const w = foe || own;
+        const sec = w.sectors[0];
+        return this.create('capture', { faction: f, tid: w.id, sectorName: sec.def.name, x: sec.def.x, z: sec.def.z, r: sec.def.r * 1.6, data: { tid: w.id, sid: sec.id }, expected: 30 });
+      }
+      case 'defend': {
+        const w = own || near[0];
+        const sec = w.sectors[0];
+        return this.create('defend', { faction: f, tid: w.id, sectorName: sec.def.name, x: sec.def.x, z: sec.def.z, r: sec.def.r * 1.8, data: { tid: w.id, sid: sec.id, waves: 2 }, expected: 25 });
+      }
+      default: return null;
+    }
+  }
+
   onCampaignReset() {
     for (const m of this.active()) this.finish(m, false, 'Campaign ended');
     for (const op of this.operations.values()) op.status = 'failed';
@@ -713,19 +820,18 @@ export class MissionSystem {
     this.changed();
   }
 
-  view() {
+  view(f) {
     const g = this.game;
     return {
-      missions: [...this.missions.values()].map((m) => ({
+      missions: [...this.missions.values()].filter((m) => m.faction === f).map((m) => ({
         id: m.id, type: m.type, title: m.title, brief: m.brief, tid: m.tid, x: Math.round(m.x), z: Math.round(m.z), r: Math.round(m.r),
         diff: m.difficulty, rec: m.recRank, xp: m.rewards.xp, cr: m.rewards.credits, ends: Math.max(0, Math.round(m.endsAt - g.time)),
         status: m.status, result: m.result, prog: m.progress, op: m.opId ? (this.operations.get(m.opId) || {}).name : '', n: m.contrib.size,
         points: m.type === 'recon' ? m.data.points.map((p) => [Math.round(p.x), Math.round(p.z), p.done ? 1 : 0]) : undefined,
         dest: m.data.dest ? [Math.round(m.data.dest.x), Math.round(m.data.dest.z)] : m.data.extract ? [Math.round(m.data.extract.x), Math.round(m.data.extract.z)] : undefined,
       })),
-      operations: [...this.operations.values()].filter((o) => o.status === 'active').map((o) => ({ id: o.id, name: o.name, tid: o.tid, ends: Math.round(o.endsAt - g.time), by: o.by })),
+      operations: [...this.operations.values()].filter((o) => o.status === 'active' && o.faction === f).map((o) => ({ id: o.id, name: o.name, tid: o.tid, ends: Math.round(o.endsAt - g.time), by: o.by })),
     };
   }
 }
 
-export { enemyOf };

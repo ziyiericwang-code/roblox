@@ -1,7 +1,7 @@
 // Basic training: a short interactive course at Fort Sentinel (~4 minutes)
 // covering movement, shooting, objectives, commands, vehicles and medical.
 // Also runs the marksmanship qualification on any base range.
-import { FACTION, LIFE, STANCE } from '../../shared/constants.js';
+import { LIFE, STANCE, FACTION_INFO } from '../../shared/constants.js';
 import { XP } from '../../shared/config/economy.js';
 import { MSG } from '../../shared/protocol.js';
 import { dist2D } from '../../shared/math.js';
@@ -35,8 +35,8 @@ export class TrainingSystem {
     }
   }
 
-  marker(type) {
-    const base = this.game.world.bases[FACTION.COALITION];
+  marker(type, f) {
+    const base = this.game.world.bases[f] || Object.values(this.game.world.bases)[0];
     return base.markers.find((m) => m.type === type) || base;
   }
 
@@ -45,19 +45,19 @@ export class TrainingSystem {
     const step = TRAINING_STEPS[t.step];
     if (!step) return null;
     switch (step.id) {
-      case 'move': return this.marker('course_start');
-      case 'course': return this.marker('course_end');
+      case 'move': return this.marker('course_start', session.faction);
+      case 'course': return this.marker('course_end', session.faction);
       case 'range':
       case 'reload':
-      case 'grenade': return this.marker('range_pos');
-      case 'capture': return this.marker('drill');
+      case 'grenade': return this.marker('range_pos', session.faction);
+      case 'capture': return this.marker('drill', session.faction);
       case 'vehicle': {
-        const base = this.game.world.bases[FACTION.COALITION];
+        const base = this.game.world.bases[session.faction];
         return this.game.world.vehicleSpawns.find((v) => v.base === base.id && v.vtype === 'jeep') || base;
       }
       case 'medic': {
         const d = t.dummy ? this.game.get(t.dummy) : null;
-        return d || this.marker('medical') || this.marker('spawn_yard');
+        return d || this.marker('medical', session.faction) || this.marker('spawn_yard', session.faction);
       }
       default: return null;
     }
@@ -119,7 +119,7 @@ export class TrainingSystem {
     }
     session.training = null;
     session.send({ t: MSG.TRAININGSTATE, active: false, done: true, skipped: !!skipped });
-    g.notify(session, skipped ? 'Training waived. Report to the front, Private.' : 'Training complete. Welcome to the Coalition, Private!', 'good');
+    g.notify(session, skipped ? 'Training waived. Report to the front, Private.' : `Training complete. Welcome to the ${FACTION_INFO[session.faction].army}, Private!`, 'good');
     session.dirtyProfile = true;
     session.saveDirty = true;
     g.deploySys.sendOptions(session);
@@ -127,8 +127,8 @@ export class TrainingSystem {
 
   spawnDummy(session) {
     const g = this.game;
-    const m = this.marker('medical');
-    const s = g.npc.spawnSoldier(FACTION.COALITION, m.x + 3, m.z + 2, { kit: 'rifleman', name: 'Trainee Novak' });
+    const m = this.marker('medical', session.faction);
+    const s = g.npc.spawnSoldier(session.faction, m.x + 3, m.z + 2, { kit: 'rifleman', name: 'Trainee Novak' });
     if (!s) return;
     s.life = LIFE.DOWNED;
     s.stance = STANCE.PRONE;
@@ -151,7 +151,7 @@ export class TrainingSystem {
   onShot(session) {
     const s = session.soldier;
     if (!s) return;
-    const r = this.marker('range_pos');
+    const r = this.marker('range_pos', session.faction);
     if (!r || dist2D(s.x, s.z, r.x, r.z) > (r.r || 12) + 4) {
       session.range = null;
       return;

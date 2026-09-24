@@ -2,7 +2,7 @@
 
 export const GAME = {
   // --- AI / battles
-  npcCap: 72, // hard cap on combat NPCs (adaptive: reduced automatically when ticks run long)
+  npcCap: 90, // hard cap on combat NPCs (adaptive: reduced automatically when ticks run long)
   npcCapMin: 24,
   ambientNpcCap: 26,
   squadSize: 5,
@@ -11,7 +11,9 @@ export const GAME = {
   reinforceInterval: 38, // seconds between AI reinforcement checks per battle
   aiThinkInterval: 0.25,
   aiFarThinkInterval: 1.2,
-  aiNearPlayerRadius: 320,
+  aiLightThinkInterval: 3,
+  aiNearPlayerRadius: 170, // full simulation level
+  aiMidRadius: 420, // reduced level; beyond: light
   aiPathBudgetPerTick: 3,
   aiDetectRange: 115,
   aiAccuracy: 0.55,

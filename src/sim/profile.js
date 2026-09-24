@@ -1,11 +1,15 @@
 // Persistent career profile: schema, defaults, migration and sanitising.
-export const PROFILE_VERSION = 2;
+import { LEGACY_RANK_MAP, MAX_RANK } from '../shared/config/ranks.js';
+import { COUNTRY_IDS } from '../shared/constants.js';
+
+export const PROFILE_VERSION = 3;
 
 export const STAT_KEYS = [
   'kills', 'deaths', 'downs', 'headshots', 'assists', 'revives', 'revived', 'heals', 'resupplies', 'repairs',
   'captures', 'territories', 'defends', 'objectives', 'missions', 'missionsFailed', 'battles', 'operations',
   'leadership', 'service', 'officerService', 'spots', 'supplies', 'valor', 'campaigns', 'vehicleKills',
   'targets', 'rescues', 'recons', 'shots', 'hits', 'rangeBest', 'training', 'ordersIssued', 'ordersFollowed',
+  'crew', 'distance', 'promotions',
 ];
 
 export function defaultProfile(id, name) {
@@ -19,6 +23,7 @@ export function defaultProfile(id, name) {
     created: Date.now(),
     lastSeen: Date.now(),
     rank: 0,
+    country: 0, // chosen at enlistment (FACTION id)
     xp: 0,
     credits: 0,
     rating: 0,
@@ -58,6 +63,13 @@ export function migrateProfile(p, id, name) {
     // v1 -> v2: 'objectives' stat introduced
     out.stats.objectives = (out.stats.captures | 0) + (out.stats.defends | 0);
   }
+  if ((p.v || 1) < 3) {
+    // v2 -> v3: 21-rank ladder became the full 30-rank hierarchy, three countries
+    out.rank = LEGACY_RANK_MAP[Math.max(0, Math.min(20, p.rank | 0))];
+    out.country = 0;
+  }
+  out.rank = Math.max(0, Math.min(MAX_RANK, out.rank | 0));
+  if (!COUNTRY_IDS.includes(out.country)) out.country = 0;
   out.v = PROFILE_VERSION;
   if (name && !p.name) out.name = name;
   return out;
@@ -69,6 +81,7 @@ export function profileView(p) {
     id: p.id,
     name: p.name,
     rank: p.rank,
+    country: p.country,
     xp: p.xp,
     credits: p.credits,
     rating: Math.round(p.rating || 0),

@@ -51,7 +51,7 @@ export const WEAPONS = {
   br4: gun({
     id: 'br4', name: 'BR-4 Battle Rifle', cls: WEAPON_CLASS.RIFLE, slot: 0, sound: 'battle', model: 'battle',
     damage: 36, rpm: 460, mag: 20, reserve: 100, reload: 2.4, range: 320, falloffStart: 80, falloffEnd: 260,
-    spreadHip: 2.9, spreadAds: 0.25, recoilV: 1.5, recoilH: 0.4, burst: 3, minRank: 4, adsFov: 46,
+    spreadHip: 2.9, spreadAds: 0.25, recoilV: 1.5, recoilH: 0.4, burst: 3, minRank: 5, adsFov: 46,
     desc: 'Three-round burst rifle with heavy stopping power.',
   }),
   smg5: gun({
@@ -63,27 +63,27 @@ export const WEAPONS = {
   lmg9: gun({
     id: 'lmg9', name: 'LMG-9 Squad Gun', cls: WEAPON_CLASS.LMG, slot: 0, sound: 'lmg', model: 'lmg',
     damage: 24, rpm: 600, mag: 100, reserve: 300, reload: 4.6, range: 280, falloffStart: 60, falloffEnd: 220,
-    spreadHip: 3.8, spreadAds: 0.55, recoilV: 0.75, recoilH: 0.5, auto: true, minRank: 2, suppression: 0.4,
+    spreadHip: 3.8, spreadAds: 0.55, recoilV: 0.75, recoilH: 0.5, auto: true, minRank: 3, suppression: 0.4,
     crouchMult: 0.65, proneMult: 0.35, bloomMax: 3.5, equipTime: 0.8,
     desc: 'Sustained suppressive fire. Deadly when set up prone.',
   }),
   dmr24: gun({
     id: 'dmr24', name: 'M-24 Marksman', cls: WEAPON_CLASS.DMR, slot: 0, sound: 'dmr', model: 'dmr',
     damage: 52, headMult: 2.3, rpm: 280, mag: 12, reserve: 72, reload: 2.5, range: 450, falloffStart: 150, falloffEnd: 400,
-    spreadHip: 4.5, spreadAds: 0.08, recoilV: 2.4, recoilH: 0.5, minRank: 3, adsFov: 26, scoped: true, minDamageMult: 0.75,
+    spreadHip: 4.5, spreadAds: 0.08, recoilV: 2.4, recoilH: 0.5, minRank: 4, adsFov: 26, scoped: true, minDamageMult: 0.75,
     desc: 'Semi-automatic precision rifle with variable optic.',
   }),
   sr50: gun({
     id: 'sr50', name: 'SR-50 Longbow', cls: WEAPON_CLASS.SNIPER, slot: 0, sound: 'sniper', model: 'sniper',
     damage: 95, headMult: 2.5, rpm: 48, mag: 5, reserve: 30, reload: 3.2, range: 650, falloffStart: 250, falloffEnd: 600,
-    spreadHip: 6, spreadAds: 0.03, recoilV: 4.5, recoilH: 0.6, minRank: 5, adsFov: 18, scoped: true, minDamageMult: 0.85,
+    spreadHip: 6, spreadAds: 0.03, recoilV: 4.5, recoilH: 0.6, minRank: 6, adsFov: 18, scoped: true, minDamageMult: 0.85,
     suppression: 0.6, equipTime: 0.8,
     desc: 'Bolt-action long range rifle. One shot, one objective.',
   }),
   sg12: gun({
     id: 'sg12', name: 'SG-12 Breacher', cls: WEAPON_CLASS.SHOTGUN, slot: 0, sound: 'shotgun', model: 'shotgun',
     damage: 13, pellets: 9, headMult: 1.4, rpm: 95, mag: 7, reserve: 42, reload: 3.0, range: 60, falloffStart: 10, falloffEnd: 40,
-    spreadHip: 5.5, spreadAds: 4.0, recoilV: 3.5, recoilH: 1.0, minRank: 2, minDamageMult: 0.2, moveSpreadAdd: 0.4,
+    spreadHip: 5.5, spreadAds: 4.0, recoilV: 3.5, recoilH: 1.0, minRank: 3, minDamageMult: 0.2, moveSpreadAdd: 0.4,
     desc: 'Pump shotgun for clearing buildings and trenches.',
   }),
   p9: gun({
@@ -95,13 +95,13 @@ export const WEAPONS = {
   r45: gun({
     id: 'r45', name: 'R-45 Revolver', cls: WEAPON_CLASS.PISTOL, slot: 1, sound: 'revolver', model: 'revolver',
     damage: 46, rpm: 160, mag: 6, reserve: 36, reload: 2.6, range: 140, falloffStart: 25, falloffEnd: 90,
-    spreadHip: 1.9, spreadAds: 0.35, recoilV: 3.2, recoilH: 0.7, minRank: 6, equipTime: 0.35, adsFov: 58,
+    spreadHip: 1.9, spreadAds: 0.35, recoilV: 3.2, recoilH: 0.7, minRank: 7, equipTime: 0.35, adsFov: 58,
     desc: 'Heavy revolver for senior NCOs and officers.',
   }),
   rl3: {
     ...base, kind: 'launcher', id: 'rl3', name: 'RL-3 Launcher', cls: WEAPON_CLASS.LAUNCHER, slot: 2, sound: 'rocket', model: 'launcher',
     mag: 1, reserve: 3, reload: 3.4, rpm: 60, projectile: 'rocket', speed: 75, gravity: 2.2, splash: 5.5, splashDamage: 105,
-    vehicleDamage: 360, spreadHip: 3, spreadAds: 0.4, recoilV: 4, recoilH: 1, adsFov: 50, minRank: 2, equipTime: 0.9,
+    vehicleDamage: 360, spreadHip: 3, spreadAds: 0.4, recoilV: 4, recoilH: 1, adsFov: 50, minRank: 3, equipTime: 0.9,
     desc: 'Anti-armor rocket. Devastating against vehicles and fortifications.',
   },
   frag: {
@@ -121,16 +121,16 @@ export const WEAPONS = {
   },
   ammobag: {
     kind: 'gadget', id: 'ammobag', name: 'Ammo Pack', cls: WEAPON_CLASS.GADGET, slot: 2, uses: 4, cooldown: 12,
-    radius: 6, lifetime: 45, minRank: 2,
+    radius: 6, lifetime: 45, minRank: 3,
     desc: 'Drop an ammunition pack that resupplies nearby soldiers and restores armor.',
   },
   repair: {
-    kind: 'gadget', id: 'repair', name: 'Repair Tool', cls: WEAPON_CLASS.GADGET, slot: 2, repairPerSec: 60, range: 5, minRank: 2,
+    kind: 'gadget', id: 'repair', name: 'Repair Tool', cls: WEAPON_CLASS.GADGET, slot: 2, repairPerSec: 60, range: 5, minRank: 3,
     desc: 'Repair vehicles and fortifications.',
   },
   charge: {
     kind: 'gadget', id: 'charge', name: 'Demolition Charge', cls: WEAPON_CLASS.GADGET, slot: 3, count: 2, plantTime: 3,
-    fuse: 6, splash: 8, splashDamage: 150, vehicleDamage: 500, targetDamage: 600, minRank: 2,
+    fuse: 6, splash: 8, splashDamage: 150, vehicleDamage: 500, targetDamage: 600, minRank: 3,
     desc: 'Plant on enemy targets and vehicles. Detonates after a short fuse.',
   },
   binoculars: {

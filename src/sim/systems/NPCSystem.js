@@ -1,23 +1,35 @@
-// AI soldiers: squad director (per faction), perception, cover, combat, medics,
-// retreats, followers and special mission NPCs (captives, VIPs).
+// AI soldiers: the physical layer of the war. Squads are materialised from the
+// war's battalions around players (live battles, garrison patrols) and vanish
+// again when nobody is near; every NPC killed is a casualty of its battalion.
+// Also: squad director, perception, cover, combat, medics, retreats,
+// followers and special mission NPCs (captives, VIPs).
 //
-// Performance model: NPCs near a player think 4x/s and simulate full character
-// physics every tick; distant NPCs think ~1x/s and move with cheap kinematics.
+// Simulation levels (per soldier, refreshed every director pass):
+//   0 FULL     < aiNearPlayerRadius  think 4x/s, full character physics, shoots
+//   1 REDUCED  < aiMidRadius         think ~1x/s, cheap kinematics, shoots at 5 Hz
+//   2 LIGHT    beyond                think every 3 s, kinematics every 8 ticks
+//   (ABSTRACT: not materialised at all — just a number in a WarSystem battalion)
 // Pathfinding requests are budgeted per tick and line-of-sight checks per think
 // are capped, so large battles stay within the tick budget. The Game also
-// adapts the global NPC cap to measured tick time.
+// adapts the global NPC cap and its load level to measured tick time.
 import { FACTION, LIFE, STANCE, PROP_KIND, areHostile, enemyOf, SEA_LEVEL, HEALTH } from '../../shared/constants.js';
 import { GAME } from '../../shared/config/game.js';
+import { WAR } from '../../shared/config/war.js';
+import { surnameFor } from '../../shared/config/names.js';
 import { WEAPONS } from '../../shared/config/weapons.js';
 import { stepCharacter, eyeHeight } from '../../shared/physics.js';
 import { Rng, dist2D, yawFromDir, approachAngle, angleDiff, clamp, dirFromYawPitch } from '../../shared/math.js';
 import { spreadDir } from '../../shared/combat.js';
 import { makeWeaponState } from '../entities.js';
+import { rankOf } from '../../shared/config/ranks.js';
 
-const NAMES = {
-  [FACTION.COALITION]: ['Miller', 'Chen', 'Okafor', 'Duarte', 'Novak', 'Singh', 'Brooks', 'Larsen', 'Moreau', 'Haddad', 'Kowalski', 'Reyes', 'Tanaka', 'Walsh', 'Nkemelu', 'Berg', 'Costa', 'Fischer', 'Adler', 'Quinn'],
-  [FACTION.DOMINION]: ['Kraus', 'Voss', 'Orlov', 'Drago', 'Stahl', 'Varga', 'Radek', 'Ivanek', 'Kessel', 'Morrow', 'Zoric', 'Halvard', 'Brenner', 'Sokol', 'Dunaj', 'Petrak', 'Lenz', 'Marek', 'Tovar', 'Grom'],
-};
+function rankFollowerCap(rank) {
+  const rk = rankOf(rank);
+  return rk.npcFollowers || Math.floor(rk.squadSize / 3);
+}
+
+// Field uniforms per country.
+export const FACTION_CAMO = { [FACTION.ALDMARK]: 'woodland', [FACTION.KARSA]: 'karsa', [FACTION.SERAVIA]: 'seravia' };
 
 const ROLE_KIT = {
   leader: { weapons: ['br4', 'p9', 'smoke', 'frag'], armor: 40, role: 'leader' },
@@ -26,6 +38,7 @@ const ROLE_KIT = {
   medic: { weapons: ['smg5', 'p9', 'medkit', 'smoke'], armor: 30, role: 'medic' },
   engineer: { weapons: ['smg5', 'p9', 'rl3', 'frag'], armor: 35, role: 'engineer' },
   scout: { weapons: ['dmr24', 'p9', 'smoke'], armor: 20, role: 'scout' },
+  officer: { weapons: ['p9'], armor: 10, role: 'leader' },
 };
 const SQUAD_ROLES = ['leader', 'rifleman', 'support', 'medic', 'rifleman', 'engineer', 'scout', 'rifleman'];
 
@@ -53,6 +66,9 @@ export class NPCSystem {
     this.lastGunfire = new Map();
     this.reinforceAt = new Map(); // `${battleId}:${faction}` -> time
     this.garrisonTimer = 0;
+    this.live = new Map(); // `${territory}:${faction}` -> materialised soldiers (refreshed each pass)
+    this.deferred = []; // mission squads waiting for a player to come near
+    this.pathCount = 0;
   }
 
   // ------------------------------------------------------------------ queries
@@ -102,18 +118,19 @@ export class NPCSystem {
     const kit = ROLE_KIT[kitName] || ROLE_KIT.rifleman;
     let px = x;
     let pz = z;
-    if (g.world.nav && !g.world.nav.isWalkable(px, pz)) {
+    if (!opts.exact && g.world.nav && !g.world.nav.isWalkable(px, pz)) {
       const p = g.world.nav.randomPointNear(px, pz, 12, () => this.rng.next());
       px = p.x;
       pz = p.z;
     }
-    const y = g.world.colliders.groundHeight(px, pz, 500);
+    const y = g.world.colliders.groundHeight(px, pz, opts.y !== undefined ? opts.y + 1 : 800);
     if (y < SEA_LEVEL - 0.8) return null;
-    const rank = opts.rank ?? (kitName === 'leader' ? this.rng.int(4, 6) : this.rng.int(1, 3));
+    const rank = opts.rank ?? (kitName === 'leader' ? this.rng.int(5, 8) : this.rng.int(1, 4));
+    const desert = g.world.biomeAt && /desert|canyon/.test(g.world.biomeAt(px, pz) || '');
     const s = g.addSoldier({
-      faction, name: opts.name || `${this.rng.pick(NAMES[faction] || NAMES[1])}`, rank, role: kit.role,
+      faction, name: opts.name || surnameFor(faction, this.rng.int(0, 999)), rank, role: kit.role,
       x: px, y, z: pz, yaw: opts.yaw ?? this.rng.float(-Math.PI, Math.PI), weapons: kit.weapons, armor: opts.armor ?? kit.armor,
-      camo: faction === FACTION.COALITION ? (this.rng.chance(0.5) ? 'woodland' : 'desert') : 'dominion', headgear: 'helmet',
+      camo: opts.camo || (desert && faction !== FACTION.KARSA ? 'desert' : FACTION_CAMO[faction] || 'woodland'), headgear: opts.headgear || 'helmet',
       ambient: !!opts.ambient, captive: !!opts.captive,
     });
     s.npc = {
@@ -124,6 +141,7 @@ export class NPCSystem {
       reactionAt: 0, stuckT: 0, lastX: px, lastZ: pz, lastCheck: g.time, calloutAt: 0, grenadeAt: g.time + 15,
       rocketAt: 0, sprint: false, far: false, stance: STANCE.STAND, slot: 0, vip: !!opts.vip, rescuer: null,
       mission: opts.mission || 0, kind: opts.ambient ? 'ambient' : 'combat', holdPos: null, jump: false, crouchT: 0,
+      lod: 0, tid: opts.tid || null, post: null, amb: null, followId: 0, peek: false,
     };
     for (const w of s.weapons) if (WEAPONS[w.id] && WEAPONS[w.id].kind === 'gun') w.reserve = 9999;
     if (opts.health) s.health = opts.health;
@@ -133,17 +151,22 @@ export class NPCSystem {
   spawnSquad(faction, x, z, task, opts = {}) {
     const g = this.game;
     const size = opts.size || GAME.squadSize;
+    // mission squads far from every player wait (abstractly) until someone comes
+    if (opts.mission && !opts.force && !opts.deferred && !this.nearPlayer(x, z, 650)) {
+      this.deferred.push({ faction, x, z, task, opts: { ...opts, deferred: true } });
+      return null;
+    }
     if (!opts.force && this.combatCount() + size > g.npcCap + (opts.special ? 8 : 0)) return null;
     const sq = {
       id: this.nextSquadId++, faction, members: [], leaderId: 0, task: { ...task }, battleId: opts.battle || 0,
       mission: opts.mission || 0, special: !!opts.special, attachedTo: opts.attachedTo || null, attachedSquad: opts.attachedSquad || 0,
       spawned: g.time, original: size, alertPos: null, alertUntil: 0, retreating: false, orderedUntil: 0, lastTaskAt: g.time,
-      insurgent: !!opts.insurgent, noPlayerSince: g.time,
+      insurgent: !!opts.insurgent, noPlayerSince: g.time, tid: opts.tid || null, garrison: null,
     };
     for (let i = 0; i < size; i++) {
       const kit = opts.kits ? opts.kits[i % opts.kits.length] : SQUAD_ROLES[i % SQUAD_ROLES.length];
       const a = (i / size) * Math.PI * 2;
-      const s = this.spawnSoldier(faction, x + Math.cos(a) * 2.5, z + Math.sin(a) * 2.5, { kit, mission: opts.mission, skill: opts.insurgent ? this.rng.float(0.2, 0.45) : undefined });
+      const s = this.spawnSoldier(faction, x + Math.cos(a) * 2.5, z + Math.sin(a) * 2.5, { kit, mission: opts.mission, tid: opts.tid, skill: opts.insurgent ? this.rng.float(0.2, 0.45) : undefined });
       if (!s) continue;
       s.npc.squad = sq.id;
       s.squadId = 100 + (sq.id % 150);
@@ -321,6 +344,7 @@ export class NPCSystem {
   }
 
   releaseMissionSquads(missionId) {
+    this.deferred = this.deferred.filter((d) => d.opts.mission !== missionId);
     for (const sq of this.squads.values()) if (sq.mission === missionId) {
       sq.mission = 0;
       sq.special = false;
@@ -353,6 +377,7 @@ export class NPCSystem {
       case 'regroup': task = { type: 'move', x: order.x, z: order.z, r: 8 }; break;
       case 'escort': task = order.targetId ? { type: 'follow', targetId: order.targetId, r: 10 } : { type: 'move', x: order.x, z: order.z, r: 10 }; break;
       case 'retreat': task = { type: 'retreat', x: order.x, z: order.z, r: 15 }; break;
+      case 'reinforce': task = { type: 'defend', x: order.x, z: order.z, r: 26 }; break;
       default: return;
     }
     sq.orderedUntil = order.expiresAt;
@@ -363,34 +388,72 @@ export class NPCSystem {
   }
 
   // ------------------------------------------------------------------ director
+  playerPoints() {
+    const out = [];
+    for (const sess of this.game.sessions) {
+      const s = sess.soldier;
+      const p = s && s.life !== LIFE.DEAD ? s : sess.viewPos;
+      if (p) out.push({ x: p.x, z: p.z, faction: sess.faction });
+    }
+    return out;
+  }
+
+  nearestPlayerDist(x, z, pts) {
+    let d = Infinity;
+    for (const p of pts) {
+      const dd = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z);
+      if (dd < d) d = dd;
+    }
+    return Math.sqrt(d);
+  }
+
+  liveCount(tid, f) {
+    return this.live.get(`${tid}:${f}`) || 0;
+  }
+
   director() {
     const g = this.game;
     const war = g.war;
-    // refresh "near player" flags for LOD
+    const pts = this.playerPoints();
+    const load = g.load || 0;
+    // simulation level per soldier + materialised counts per territory/side
+    this.live.clear();
+    const nearR = GAME.aiNearPlayerRadius;
+    const midR = GAME.aiMidRadius;
     for (const s of g.soldiers) {
-      if (!s.npc) continue;
-      s.npc.far = !this.nearPlayer(s.x, s.z, GAME.aiNearPlayerRadius);
+      const b = s.npc;
+      if (!b || b.kind === 'ambient') continue;
+      const d = this.nearestPlayerDist(s.x, s.z, pts);
+      b.lod = d < nearR ? 0 : d < midR ? 1 : 2;
+      b.far = b.lod > 0;
+      if (b.tid && s.life !== LIFE.DEAD) {
+        const k = `${b.tid}:${s.faction}`;
+        this.live.set(k, (this.live.get(k) || 0) + 1);
+      }
     }
-    // battles: keep both sides supplied with squads
+    // live battles: both sides materialise from their battalions
     for (const b of war.battles.values()) {
+      if (!b.live) continue;
       const w = war.get(b.territory);
       const t = w.def;
-      const playersNear = g.soldiersNear(t.x, t.z, t.radius * 2, (s) => s.isPlayer && s.life !== LIFE.DEAD).length;
-      for (const f of [FACTION.COALITION, FACTION.DOMINION]) {
-        const attacking = b.attacker === f;
+      const near = pts.filter((p) => dist2D(p.x, p.z, t.x, t.z) < t.radius * 2);
+      for (const f of [b.attacker, b.defender]) {
+        const attacking = f === b.attacker;
+        const own = near.filter((p) => p.faction === f).length;
+        const foe = near.filter((p) => areHostile(p.faction, f)).length;
         const off = g.commands.offensiveFor(f);
-        let want = GAME.battleSquadsPerSide + (off && off.territory === t.id ? 1 : 0);
-        if (f === FACTION.COALITION) want = Math.max(1, want - Math.floor(playersNear / 3));
-        else want += Math.min(2, Math.floor(playersNear / 4));
-        const owned = f === w.owner ? w : null;
-        if (owned && owned.supply < 25) want = Math.max(1, want - 1);
-        if (!playersNear) want = Math.min(want, 2);
+        let want = WAR.liveSquadsPerSide + (attacking ? 0 : WAR.liveSquadsDefenderBonus) + (off && off.territory === t.id ? 1 : 0);
+        want += Math.min(2, Math.floor(foe / 4)) - Math.floor(own / 3) - (load >= 1 ? 1 : 0) - (load >= 3 ? 1 : 0);
+        if (!near.length) want = Math.min(want, 2);
+        want = clamp(want, 1, 5);
         const mine = [...this.squads.values()].filter((sq) => sq.battleId === b.id && sq.faction === f && this.aliveCount(sq) >= 2);
+        const pool = war.strengthAt(t.id, f, attacking ? ['attacking'] : null) - this.liveCount(t.id, f);
         const key = `${b.id}:${f}`;
-        if (mine.length < want && (this.reinforceAt.get(key) || 0) <= g.time) {
+        if (mine.length < want && pool >= 3 && (this.reinforceAt.get(key) || 0) <= g.time) {
           this.reinforceAt.set(key, g.time + (mine.length === 0 ? 4 : GAME.reinforceInterval));
           const o = attacking ? this.reinforcementOrigin(f, t.x, t.z) : this.defenderOrigin(t, f);
-          const sq = this.spawnSquad(f, o.x, o.z, { type: 'idle' }, { battle: b.id, size: GAME.squadSize });
+          const size = Math.min(GAME.squadSize, Math.floor(pool));
+          const sq = this.spawnSquad(f, o.x, o.z, { type: 'idle' }, { battle: b.id, size, tid: t.id });
           if (sq) this.battleTask(sq, b);
         }
         for (const sq of mine) {
@@ -399,52 +462,123 @@ export class NPCSystem {
         }
       }
     }
-    // garrisons around players outside battles
+    // garrisons: quiet territories near players get patrols from their garrison
     this.garrisonTimer += 2;
-    if (this.garrisonTimer >= 10) {
+    if (this.garrisonTimer >= 6) {
       this.garrisonTimer = 0;
+      const radius = WAR.liveRadius - (load >= 2 ? 150 : 0);
       for (const w of war.map.values()) {
+        if (w.isBase || war.battleAt(w.id) || !w.owner) continue;
         const t = w.def;
-        if (t.isBase || [...war.battles.values()].some((b) => b.territory === t.id)) continue;
-        if (w.owner !== FACTION.DOMINION) continue;
-        if (!this.nearPlayer(t.x, t.z, t.radius + 250)) continue;
-        const has = [...this.squads.values()].some((sq) => sq.garrison === t.id);
-        if (has) continue;
-        const s = this.rng.pick(t.sectors);
-        const sq = this.spawnSquad(w.owner, s.x + this.rng.float(-15, 15), s.z + this.rng.float(-15, 15), { type: 'patrol', points: t.sectors.map((x) => ({ x: x.x, z: x.z })), idx: 0, r: 12 }, { size: 4 });
+        if (!pts.some((p) => dist2D(p.x, p.z, t.x, t.z) < t.radius + radius)) continue;
+        const has = [...this.squads.values()].filter((sq) => sq.garrison === t.id).length;
+        const want = load >= 2 ? 1 : WAR.garrisonSquads;
+        const pool = war.strengthAt(t.id, w.owner) - this.liveCount(t.id, w.owner);
+        if (has >= want || pool < 4) continue;
+        const pts2 = w.sectors.map((x) => ({ x: x.def.x, z: x.def.z }));
+        const start = this.rng.pick(pts2);
+        const sq = this.spawnSquad(w.owner, start.x + this.rng.float(-15, 15), start.z + this.rng.float(-15, 15), { type: 'patrol', points: this.rng.chance(0.5) ? pts2 : [...pts2].reverse(), idx: 0, r: 12 }, { size: 4, tid: t.id });
         if (sq) sq.garrison = t.id;
       }
     }
-    // despawn squads nobody can see anymore
+    // deferred mission squads appear when a player approaches
+    if (this.deferred.length) {
+      this.deferred = this.deferred.filter((d) => {
+        const m = d.opts.mission ? g.missions.get(d.opts.mission) : null;
+        if (!m || m.status !== 'active') return false;
+        if (this.nearestPlayerDist(d.x, d.z, pts) > 650) return true;
+        this.spawnSquad(d.faction, d.x, d.z, d.task, d.opts);
+        return false;
+      });
+    }
+    // dematerialise squads that nobody is near any more
     for (const sq of [...this.squads.values()]) {
-      if (sq.special || sq.attachedTo || (sq.orderedUntil > g.time)) continue;
+      if (sq.special || sq.attachedTo || sq.orderedUntil > g.time) continue;
       const c = this.squadCentroid(sq);
       if (!c) {
         this.squads.delete(sq.id);
         continue;
       }
-      const inBattle = sq.battleId && war.battles.has(sq.battleId);
-      if (this.nearPlayer(c.x, c.z, 520)) sq.noPlayerSince = g.time;
+      const nearD = this.nearestPlayerDist(c.x, c.z, pts);
+      if (nearD < 560) sq.noPlayerSince = g.time;
+      const battle = sq.battleId ? war.battles.get(sq.battleId) : null;
+      // a garrison caught up in a new battle joins it
+      if (!battle && sq.garrison) {
+        const b = war.battleAt(sq.garrison);
+        if (b && b.live && (sq.faction === b.attacker || sq.faction === b.defender)) {
+          sq.battleId = b.id;
+          sq.garrison = null;
+          this.battleTask(sq, b);
+          continue;
+        }
+      }
       const idleFor = g.time - sq.noPlayerSince;
-      if ((!inBattle && idleFor > 40) || (inBattle && idleFor > 240 && this.combatCount() > g.npcCap * 0.8)) this.disbandSquad(sq);
-      else if (!inBattle && sq.battleId) {
+      if (battle && !battle.live && nearD > 300) this.disbandSquad(sq);
+      else if (idleFor > (battle ? 60 : 30)) this.disbandSquad(sq);
+      else if (!battle && sq.battleId) {
         sq.battleId = 0;
         this.assignSquadTask(sq, { type: 'hold', x: c.x, z: c.z, r: 15 });
+      } else if (sq.garrison && war.ownerOf(sq.garrison) !== sq.faction && !war.battleAt(sq.garrison)) {
+        // territory changed hands: survivors fall back
+        const home = g.commands.nearestFriendlyAnchor(sq.faction, c.x, c.z);
+        sq.garrison = null;
+        this.assignSquadTask(sq, { type: 'retreat', x: home.x, z: home.z, r: 20 });
       }
     }
     // hard cap: trim far squads if the adaptive cap dropped
     let count = this.combatCount();
     if (count > g.npcCap + 6) {
-      for (const sq of [...this.squads.values()]) {
-        if (count <= g.npcCap) break;
-        if (sq.special || sq.attachedTo) continue;
+      const list = [...this.squads.values()].filter((sq) => !sq.special && !sq.attachedTo).map((sq) => {
         const c = this.squadCentroid(sq);
-        if (c && !this.nearPlayer(c.x, c.z, 300)) {
-          count -= sq.members.length;
-          this.disbandSquad(sq);
-        }
+        return { sq, d: c ? this.nearestPlayerDist(c.x, c.z, pts) : 1e9 };
+      }).sort((a, b) => b.d - a.d);
+      for (const { sq, d } of list) {
+        if (count <= g.npcCap || d < 250) break;
+        count -= sq.members.length;
+        this.disbandSquad(sq);
       }
     }
+  }
+
+  // An NCO recruits a soldier (base staff) into their squad's attached fireteam.
+  recruitFollower(session, npc) {
+    const g = this.game;
+    const ps = session.soldier;
+    if (!ps) return false;
+    let squad = session.squadId ? g.squads.get(session.squadId) : null;
+    if (!squad) {
+      g.squads.onMessage(session, { a: 'create' });
+      squad = session.squadId ? g.squads.get(session.squadId) : null;
+    }
+    if (!squad) return false;
+    let fsq = this.followerSquadOf(squad);
+    const cap = Math.max(2, rankFollowerCap(session.rankIndex));
+    if (fsq && fsq.members.length >= cap) return false;
+    npc.ambient = false;
+    npc.activity = 0;
+    npc.staff = 0;
+    npc.title = '';
+    npc.npc.kind = 'combat';
+    npc.npc.amb = null;
+    npc.npc.post = null;
+    if (npc.weapons.length < 2) npc.weapons = [makeWeaponState('ar7'), makeWeaponState('p9')];
+    for (const w of npc.weapons) if (WEAPONS[w.id] && WEAPONS[w.id].kind === 'gun') w.reserve = 9999;
+    if (!fsq) {
+      fsq = {
+        id: this.nextSquadId++, faction: npc.faction, members: [], leaderId: npc.id, task: { type: 'follow', targetId: ps.id, r: 6 },
+        battleId: 0, mission: 0, special: true, attachedTo: session.id, attachedSquad: squad.id, spawned: g.time, original: 1,
+        alertPos: null, alertUntil: 0, retreating: false, orderedUntil: 0, lastTaskAt: g.time, noPlayerSince: g.time, tid: null, garrison: null,
+      };
+      this.squads.set(fsq.id, fsq);
+    }
+    fsq.members.push(npc.id);
+    fsq.original = fsq.members.length;
+    npc.npc.squad = fsq.id;
+    npc.squadId = squad.id;
+    npc.infoVersion++;
+    squad.npcs = [...fsq.members];
+    this.assignSquadTask(fsq, { type: 'follow', targetId: ps.id, r: 6 });
+    return true;
   }
 
   aliveCount(sq) {
@@ -505,8 +639,10 @@ export class NPCSystem {
       this.directorTimer = 0;
       this.director();
     }
-    this.pathBudget = GAME.aiPathBudgetPerTick;
-    const farStep = g.tickCount % 4 === 0;
+    this.pathBudget = GAME.aiPathBudgetPerTick - ((g.load || 0) >= 2 ? 1 : 0);
+    const midStep = g.tickCount % 4 === 0;
+    const lightStep = g.tickCount % 8 === 0;
+    const thinkMult = 1 + (g.load || 0) * 0.35;
     for (const s of g.soldiers) {
       const b = s.npc;
       if (!b || b.kind === 'ambient') continue;
@@ -516,13 +652,14 @@ export class NPCSystem {
         continue;
       }
       if (g.time >= b.nextThink) {
-        b.nextThink = g.time + (b.far ? GAME.aiFarThinkInterval : GAME.aiThinkInterval) * this.rng.float(0.85, 1.15);
+        const iv = b.lod === 0 ? GAME.aiThinkInterval : b.lod === 1 ? GAME.aiFarThinkInterval * thinkMult : GAME.aiLightThinkInterval * thinkMult;
+        b.nextThink = g.time + iv * this.rng.float(0.85, 1.15);
         if (s.life === LIFE.ALIVE) this.think(s);
       }
       if (s.life === LIFE.DOWNED) continue;
-      if (!b.far) this.move(s, dt, false);
-      else if (farStep) this.move(s, dt * 4, true);
-      if (s.life === LIFE.ALIVE && b.target && !b.far) this.combatTick(s);
+      if (b.lod === 0) this.move(s, dt, false);
+      else if (b.lod === 1 ? midStep : lightStep) this.move(s, dt * (b.lod === 1 ? 4 : 8), true);
+      if (s.life === LIFE.ALIVE && b.target && (b.lod === 0 || (b.lod === 1 && midStep))) this.combatTick(s);
     }
   }
 
@@ -1056,6 +1193,7 @@ export class NPCSystem {
       return;
     }
     this.pathBudget--;
+    this.pathCount++;
     const p = nav.findPath(s.x, s.z, x, z, b.far ? 3000 : 6000);
     b.path = p && p.length ? p : [{ x, z }];
     b.pathIdx = 0;
@@ -1238,6 +1376,8 @@ export class NPCSystem {
 
   onKilled(target) {
     if (target.npc) {
+      // a materialised soldier of a battalion: one real casualty
+      if (target.npc.tid && target.npc.kind !== 'ambient') this.game.war.onCasualty(target.faction, target.npc.tid);
       this.releaseCover(target);
       const sq = this.squads.get(target.npc.squad);
       if (sq) {

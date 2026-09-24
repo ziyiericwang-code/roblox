@@ -1,7 +1,8 @@
 // Career progression: XP, credits, stats, promotions, medals, rating, cosmetics.
 // All rewards flow through award(), which is idempotent per rewardId (ledger)
 // so retries / duplicate completions can never grant twice.
-import { RANKS, MAX_RANK, promotionStatus, rankOf, isOfficer, RANK } from '../../shared/config/ranks.js';
+import { RANKS, promotionOptions, promotionStatus, rankOf, isAnyOfficer, isOfficer, isWarrant, RANK } from '../../shared/config/ranks.js';
+import { LIFE } from '../../shared/constants.js';
 import { MEDALS, MEDAL_REWARDS, MEDAL_TIERS, medalTierFor } from '../../shared/config/medals.js';
 import { XP, CREDITS, LEADERSHIP, RATING } from '../../shared/config/economy.js';
 import { COSMETIC_TABLES } from '../../shared/config/cosmetics.js';
@@ -125,41 +126,100 @@ export class ProgressionSystem {
     }
   }
 
+  // Promotions are not automatic: once the requirements for a rank are met the
+  // soldier sees PROMOTION AVAILABLE and reports to a friendly base or a senior
+  // officer to receive it. Only Recruit -> Private (end of basic training)
+  // happens on the spot.
   checkPromotion(session) {
     const p = session.profile;
-    let promoted = false;
-    for (let guard = 0; guard < 3; guard++) {
-      if (p.rank >= MAX_RANK) break;
-      const st = promotionStatus(p);
-      if (!st.met) break;
-      p.rank += 1;
-      promoted = true;
-      const rk = RANKS[p.rank];
-      const credits = CREDITS.promotionPerRank * p.rank;
-      p.credits += credits;
-      this.record(session, 'promotion', `Promoted to ${rk.name}`);
-      if (p.rank === RANK.SECOND_LT) this.record(session, 'milestone', 'Commissioned as an officer');
-      if (p.rank === RANK.CORPORAL) this.record(session, 'milestone', 'Became a non-commissioned officer');
-      if (p.rank === RANK.BRIG_GENERAL) this.record(session, 'milestone', 'Promoted to flag rank');
-      // unlock rank cosmetics
-      if (p.rank >= RANK.SECOND_LT && !p.unlocks.headgear.includes('beret')) p.unlocks.headgear.push('beret');
-      if (p.rank >= RANK.SECOND_LT && !p.unlocks.camo.includes('dress')) p.unlocks.camo.push('dress');
-      if (p.rank >= RANK.BRIG_GENERAL && !p.unlocks.headgear.includes('cap')) p.unlocks.headgear.push('cap');
-      if (p.rank >= RANK.BRIG_GENERAL && !p.unlocks.camo.includes('command')) p.unlocks.camo.push('command');
-      this.game.emit(['promo', p.rank, credits], { to: session });
-      this.game.radio(session.faction, 'command', 'HQ', `${session.name} has been promoted to ${rk.name}.`, { priority: 1 });
-      if (session.soldier) {
-        session.soldier.rank = p.rank;
-        session.soldier.infoVersion++;
-      }
+    if (!p) return;
+    const ready = promotionOptions(p).filter((o) => o.met).map((o) => o.to);
+    if (p.rank === RANK.RECRUIT && ready.includes(RANK.PRIVATE)) {
+      this.promote(session, RANK.PRIVATE, 'training');
+      return;
     }
-    if (promoted) {
+    const key = ready.join(',');
+    if (key !== (session.promotionKey || '')) {
+      const fresh = ready.filter((r) => !(session.promotionReady || []).includes(r));
+      session.promotionReady = ready;
+      session.promotionKey = key;
+      for (const to of fresh) this.game.emit(['promoReady', to, promotionStatus(p, to).kind], { to: session });
       session.dirtyProfile = true;
-      session.saveDirty = true;
-      this.game.squads.onRankChanged(session);
-      this.game.commands.sendState(session);
-      this.checkMedals(session);
     }
+  }
+
+  // Where a promotion can be received: a friendly base, or face to face with
+  // a senior officer (player or NPC) who outranks the new rank.
+  promotionVenue(session, to) {
+    const g = this.game;
+    const s = session.soldier;
+    if (!s || s.life === LIFE.DEAD) return null;
+    if (g.isFriendlyBase(s.x, s.z, session.faction)) return 'base';
+    const senior = g.soldiersNear(s.x, s.z, 7, (e) => e !== s && e.faction === s.faction && e.life === LIFE.ALIVE && e.rank > to && !e.captive)[0];
+    return senior ? senior : null;
+  }
+
+  onPromote(session, msg) {
+    const p = session.profile;
+    const to = msg.to | 0;
+    const st = promotionStatus(p, to);
+    if (st.invalid || st.maxed) return;
+    if (!st.met) {
+      this.game.notify(session, `Requirements for ${RANKS[to].name} are not met yet.`, 'warn');
+      return;
+    }
+    const venue = this.promotionVenue(session, to);
+    if (!venue) {
+      this.game.notify(session, 'Report to any friendly base, command post or senior officer to receive your promotion.', 'warn');
+      return;
+    }
+    this.promote(session, to, venue === 'base' ? 'base' : 'officer', venue === 'base' ? null : venue);
+  }
+
+  // Apply a rank change (also used by the admin sandbox with how = 'admin').
+  promote(session, to, how = 'base', officer = null) {
+    const p = session.profile;
+    const g = this.game;
+    const from = p.rank;
+    if (to === from) return;
+    p.rank = to;
+    const rk = RANKS[to];
+    const up = to > from;
+    session.promotionReady = [];
+    session.promotionKey = '';
+    if (up && how !== 'admin') {
+      const credits = CREDITS.promotionPerRank * Math.min(20, to);
+      p.credits += credits;
+      this.addStat(session, 'promotions', 1, true);
+      const kind = rk.track !== rankOf(from).track ? (isWarrant(to) ? 'warrant' : 'commission') : 'promotion';
+      this.record(session, 'promotion', kind === 'commission' ? `Commissioned as ${rk.name}` : kind === 'warrant' ? `Appointed ${rk.name}` : `Promoted to ${rk.name}`);
+      if (to === RANK.CORPORAL) this.record(session, 'milestone', 'Became a non-commissioned officer');
+      if (to === RANK.SMA) this.record(session, 'milestone', 'Became the Sergeant Major of the Army');
+      if (to === RANK.BRIG_GENERAL) this.record(session, 'milestone', 'Promoted to flag rank');
+      if (to === RANK.GENERAL_OF_ARMY) this.record(session, 'milestone', 'Promoted to General of the Army');
+      const by = officer ? `${rankOf(officer.rank).abbr} ${officer.name}` : '';
+      g.emit(['promo', to, credits, kind, by], { to: session });
+      g.radio(session.faction, 'command', 'HQ', `${session.name} has been ${kind === 'commission' ? 'commissioned' : 'promoted'} ${kind === 'commission' ? 'as' : 'to'} ${rk.name}.`, { priority: 1 });
+      if (officer && officer.npc) g.hierarchy.promotionSpeech(officer, session, to);
+    } else if (how === 'admin') {
+      this.record(session, 'admin', `Rank set to ${rk.name} (sandbox)`);
+      g.emit(['promo', to, 0, 'admin', ''], { to: session });
+    }
+    // rank-bound cosmetics
+    if (isAnyOfficer(to) && !p.unlocks.headgear.includes('beret')) p.unlocks.headgear.push('beret');
+    if (isOfficer(to) && !p.unlocks.camo.includes('dress')) p.unlocks.camo.push('dress');
+    if (to >= RANK.BRIG_GENERAL && !p.unlocks.headgear.includes('cap')) p.unlocks.headgear.push('cap');
+    if (to >= RANK.BRIG_GENERAL && !p.unlocks.camo.includes('command')) p.unlocks.camo.push('command');
+    if (session.soldier) {
+      session.soldier.rank = to;
+      session.soldier.infoVersion++;
+    }
+    session.dirtyProfile = true;
+    session.saveDirty = true;
+    g.squads.onRankChanged(session);
+    g.commands.sendState(session);
+    this.checkMedals(session);
+    this.checkPromotion(session);
   }
 
   checkMedals(session) {
@@ -212,8 +272,10 @@ export class ProgressionSystem {
         if (g.time - s.lastActiveAt > 120) continue; // idle soldiers do not earn service time
         if (!s.profile.trainingComplete) continue;
         this.addStat(s, 'service', 1, true);
-        if (isOfficer(s.profile.rank)) this.addStat(s, 'officerService', 1, true);
+        if (isAnyOfficer(s.profile.rank)) this.addStat(s, 'officerService', 1, true);
+        if (s.soldier.vehicle) this.addStat(s, 'crew', 1, true);
         this.award(s, { xp: XP.servicePayPerMin, credits: CREDITS.perServiceMinute, reason: 'Service', cat: 'service', silent: true, noMult: true });
+        this.checkPromotion(s);
       }
     }
     // push profile updates at most twice a second

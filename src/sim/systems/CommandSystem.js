@@ -1,8 +1,8 @@
 // Command hierarchy: contextual orders from leaders/officers to units under them,
 // leadership rewards for following-through, and rank-gated officer abilities
 // limited by per-player cooldowns and the faction's shared Command Points.
-import { LIFE, PROP_KIND, FACTION, areHostile, enemyOf } from '../../shared/constants.js';
-import { ORDERS, ORDER_COOLDOWN, ORDER_LIFETIME, ABILITIES, COMMAND_POINTS } from '../../shared/config/commands.js';
+import { LIFE, PROP_KIND, HEALTH } from '../../shared/constants.js';
+import { ORDERS, ORDER_COOLDOWN, ORDER_LIFETIME, ABILITIES, canUseAbility, abilityRankLabel } from '../../shared/config/commands.js';
 import { rankOf, SCOPE, SCOPE_NAMES, RANK } from '../../shared/config/ranks.js';
 import { XP, LEADERSHIP } from '../../shared/config/economy.js';
 import { MSG, V } from '../../shared/protocol.js';
@@ -22,13 +22,18 @@ export class CommandSystem {
     const def = ORDERS[msg.order];
     if (!def) return;
     const rk = rankOf(session.rankIndex);
-    let scope = V.int(msg.scope, 1, 5) ? msg.scope : SCOPE.SQUAD;
+    let scope = V.int(msg.scope, 1, SCOPE.THEATER) ? msg.scope : SCOPE.SQUAD;
     if (rk.scope < SCOPE.SQUAD) {
       if (g.training.onOrderAttempt(session)) {
         g.notify(session, 'Command wheel works. You can issue real orders from the rank of Corporal.', 'info');
         return;
       }
       g.notify(session, 'Only NCOs and officers can issue orders.', 'warn');
+      return;
+    }
+    if (!rk.orders.includes(def.id)) {
+      const who = def.id === 'reinforce' ? 'Captains and above' : 'Sergeants and above';
+      g.notify(session, `${def.name.toUpperCase()} orders are given by ${who}.`, 'warn');
       return;
     }
     scope = Math.min(scope, rk.scope);
@@ -41,10 +46,10 @@ export class CommandSystem {
       x = s.x;
       z = s.z;
     } else {
-      if (!V.num(msg.x, -900, 900) || !V.num(msg.z, -900, 900)) return;
+      if (!V.num(msg.x, -3100, 3100) || !V.num(msg.z, -3100, 3100)) return;
       x = msg.x;
       z = msg.z;
-      if (s && dist2D(s.x, s.z, x, z) > 1500) return;
+      if (s && scope < SCOPE.BATTALION && dist2D(s.x, s.z, x, z) > 1500) return;
     }
     if (msg.order === 'retreat') {
       const t = this.nearestFriendlyAnchor(session.faction, s ? s.x : x, s ? s.z : z);
@@ -71,6 +76,15 @@ export class CommandSystem {
       }
     }
     for (const nsq of npcSquads) g.npc.applyOrder(nsq, order);
+    // REINFORCE also calls up the army: reserves march to the territory
+    if (def.id === 'reinforce') {
+      const t = g.territoryAt(x, z);
+      if (t && g.war.ownerOf(t.id) === session.faction) g.war.requestReinforcement(session.faction, t.id, session);
+      else if (t) {
+        const b = g.war.battleAt(t.id);
+        if (b && b.attacker === session.faction) g.war.requestReinforcement(session.faction, t.id, session);
+      }
+    }
     g.squads.changed();
     g.progression.addStat(session, 'ordersIssued', 1, true);
     const units = playerSquads.length + npcSquads.length;
@@ -80,7 +94,10 @@ export class CommandSystem {
   placeName(x, z) {
     const g = this.game;
     const t = g.territoryAt(x, z);
-    if (!t) return 'the marked position';
+    if (!t) {
+      const p = g.world.placeAt(x, z);
+      return p && p.place ? p.place : p && p.region ? `the ${p.region} countryside` : 'the marked position';
+    }
     let best = null;
     let bd = 60;
     for (const s of t.sectors) {
@@ -152,8 +169,10 @@ export class CommandSystem {
       inScope = (px, pz) => (t ? dist2D(px, pz, t.x, t.z) < t.radius * 1.4 : dist2D(px, pz, x, z) < 250);
     } else if (scope === SCOPE.BATTALION) {
       const t = g.territoryAt(x, z);
-      const set = t ? [t, ...t.adjacent.map((id) => g.world.tById[id])] : [];
+      const set = t ? [t, ...t.adjacent.map((id) => g.world.tById[id]).filter(Boolean)] : [];
       inScope = (px, pz) => (set.length ? set.some((tt) => dist2D(px, pz, tt.x, tt.z) < tt.radius * 1.4) : dist2D(px, pz, x, z) < 400);
+    } else if (scope === SCOPE.REGION) {
+      inScope = (px, pz) => dist2D(px, pz, x, z) < 1500;
     } else {
       inScope = () => true;
     }
@@ -169,7 +188,7 @@ export class CommandSystem {
       if (c && inScope(c.x, c.z)) cands.push({ sq: nsq, d: dist2D(c.x, c.z, x, z), player: false });
     }
     cands.sort((a, b) => a.d - b.d);
-    const limit = scope === SCOPE.PLATOON ? 3 : scope === SCOPE.COMPANY ? 6 : 99;
+    const limit = scope === SCOPE.PLATOON ? 3 : scope === SCOPE.COMPANY ? 6 : scope === SCOPE.BATTALION ? 12 : 99;
     for (const c of cands.slice(0, limit)) (c.player ? playerSquads : npcSquads).push(c.sq);
     return { playerSquads, npcSquads };
   }
@@ -259,7 +278,7 @@ export class CommandSystem {
   onAbility(session, msg) {
     if (!V.str(msg.id, 24)) return;
     const args = {};
-    if (V.num(msg.x, -900, 900) && V.num(msg.z, -900, 900)) {
+    if (V.num(msg.x, -3100, 3100) && V.num(msg.z, -3100, 3100)) {
       args.x = msg.x;
       args.z = msg.z;
     }
@@ -275,7 +294,7 @@ export class CommandSystem {
       g.notify(session, why, 'warn');
       return false;
     };
-    if (session.rankIndex < ab.minRank) return fail(`${ab.name} requires the rank of ${rankOf(ab.minRank).name}.`);
+    if (!canUseAbility(session.rankIndex, ab)) return fail(`${ab.name} requires ${abilityRankLabel(ab)}.`);
     const ready = session.abilityReady[id] || 0;
     if (ready > g.time) return fail(`${ab.name} ready in ${Math.ceil(ready - g.time)}s.`);
     const f = session.faction;
@@ -306,6 +325,33 @@ export class CommandSystem {
         g.emit(['mark', Math.round(args.x), Math.round(args.z), ab.radius], { faction: f });
         g.radio(f, 'intel', `${rankOf(session.rankIndex).abbr} ${session.name}`, `Enemy position marked: ${n} contacts.`);
         if (n) g.progression.award(session, { xp: n * XP.spotted * 2, reason: 'Marked enemies', cat: 'support', stats: { spots: n } });
+        ok = true;
+        break;
+      }
+      case 'uav_recon': {
+        let n = 0;
+        for (const e of g.soldiersNear(args.x, args.z, ab.radius)) if (g.combat.spot(e, f, session, 45)) n++;
+        for (const v of g.vehiclesNear(args.x, args.z, ab.radius)) if (g.combat.spot(v, f, session, 45)) n++;
+        g.emit(['mark', Math.round(args.x), Math.round(args.z), ab.radius], { faction: f });
+        g.emit(['drone', Math.round(args.x), Math.round(args.z), 45], { pos: { x: args.x, z: args.z }, range: 900 });
+        g.radio(f, 'intel', `${rankOf(session.rankIndex).abbr} ${session.name}`, `Drone on station over ${this.placeName(args.x, args.z)}: ${n} contacts.`);
+        if (n) g.progression.award(session, { xp: n * XP.spotted * 2, reason: 'Drone recon', cat: 'support', stats: { spots: n, recons: 1 } });
+        ok = true;
+        break;
+      }
+      case 'rally_cry': {
+        if (!alive) return fail('You must be deployed.');
+        let n = 0;
+        for (const e of g.soldiersNear(s.x, s.z, ab.radius, (x) => x.faction === f && x.life === LIFE.ALIVE && x !== s)) {
+          e.health = Math.min(HEALTH.max, e.health + 35);
+          e.suppression = 0;
+          g.combat.resupply(e, s, 0.6);
+          e.infoVersion++;
+          n++;
+        }
+        g.npc.say(s, 'On your feet! Hold this line — nobody falls back!');
+        g.emit(['rallycry', s.id], { pos: s, range: 120 });
+        if (n) g.progression.grantLeadership(session, Math.min(10, n), 'Rally cry');
         ok = true;
         break;
       }
@@ -373,16 +419,11 @@ export class CommandSystem {
         if (!ok) return fail('Air support unavailable.');
         g.radio(f, 'command', `${rankOf(session.rankIndex).abbr} ${session.name}`, 'Gunship on station. Keep your heads down.', { priority: 1 });
         break;
-      case 'battalion':
-        ok = g.npc.deployReinforcement(f, t.commandPost.x, t.commandPost.z, 3, session);
-        if (!ok) return fail('Battalion could not be committed.');
-        g.radio(f, 'command', `${rankOf(session.rankIndex).abbr} ${session.name}`, `A battalion is committed to ${t.name}.`, { priority: 1 });
-        break;
       case 'offensive': {
         const wt = g.war.get(t.id);
         if (!wt || !g.war.isFront(t.id, f)) return fail('The offensive must target a front-line territory.');
         this.offensives[f] = { territory: t.id, until: g.time + 600, by: session.name };
-        g.war.forceBattle(t.id, wt.owner === f ? enemyOf(f) : f);
+        g.war.forceBattle(t.id, f);
         g.npc.deployReinforcement(f, t.commandPost.x, t.commandPost.z, 2, session);
         g.emit(['music', 'offensive'], { faction: f });
         g.radio(f, 'command', 'High Command', `GENERAL ${session.name.toUpperCase()} HAS ORDERED A MAJOR OFFENSIVE ON ${t.name.toUpperCase()}. ALL UNITS ADVANCE.`, { priority: 2 });
@@ -413,7 +454,7 @@ export class CommandSystem {
         g.combat.strikes.push({ at: g.time + 6 + i * 0.8, x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, type: 'he', ownerId: 0, faction });
       }
       g.emit(['incoming', Math.round(x), Math.round(z), 24], { pos: { x, z }, range: 400 });
-      g.radio(enemyOf(faction), 'intel', 'Forward Observer', `Incoming artillery at ${this.placeName(x, z)}! Take cover!`, { priority: 2 });
+      for (const e of g.war.enemies(faction)) g.radio(e, 'intel', 'Forward Observer', `Incoming artillery at ${this.placeName(x, z)}! Take cover!`, { priority: 2 });
     } else if (id === 'smoke_screen') {
       for (let i = 0; i < 4; i++) g.combat.strikes.push({ at: g.time + 3 + i * 0.5, x: x + (Math.random() - 0.5) * 18, z: z + (Math.random() - 0.5) * 18, type: 'smoke', ownerId: 0, faction });
     } else return false;
@@ -441,4 +482,3 @@ export class CommandSystem {
   }
 }
 
-export { COMMAND_POINTS, FACTION, areHostile };

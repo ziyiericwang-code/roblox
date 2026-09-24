@@ -30,14 +30,17 @@ export class DeploySystem {
     const out = [];
     const base = g.world.bases[f];
     if (!session.profile.trainingComplete && !session.profile.trainingSkipped) {
-      out.push({ id: 'training', type: 'base', name: 'Basic Training — Fort Sentinel', x: base.x, z: base.z, ok: true });
+      out.push({ id: 'training', type: 'base', name: `Basic Training — ${base.name}`, x: base.x, z: base.z, ok: true });
       return out;
     }
-    out.push({ id: 'hq', type: 'base', name: g.world.tById[FACTION_INFO[f].hq].name, x: base.x, z: base.z, ok: true });
+    out.push({ id: 'hq', type: 'base', name: `${base.name} (${FACTION_INFO[f].short} HQ)`, x: base.x, z: base.z, ok: true });
+    // deployable: garrisons, airbases, the capital and the front line. Everything
+    // else is reached by travelling (vehicles, trains, aircraft).
     for (const t of g.world.territories) {
-      if (t.isBase) continue;
       const wt = g.war.get(t.id);
       if (!wt || wt.owner !== f) continue;
+      const hub = t.type === 'military' || t.type === 'airbase' || t.type === 'capital';
+      if (!hub && !g.war.frontFor(t.id, f) && !g.war.battleAt(t.id)) continue;
       const cp = t.commandPost;
       const block = g.war.spawnBlockedReason(t, f);
       out.push({ id: `t:${t.id}`, type: 'cp', name: t.name, x: cp.x, z: cp.z, ok: !block, reason: block || '' });
@@ -142,8 +145,18 @@ export class DeploySystem {
     const f = session.faction;
     const base = g.world.bases[f];
     const frontYaw = (x, z) => {
-      const enemyHq = g.world.bases[f === 1 ? 2 : 1];
-      return yawFromDir(enemyHq.x - x, enemyHq.z - z);
+      // face the nearest enemy territory (or the base gate in peacetime)
+      let best = base.gate || base;
+      let bd = Infinity;
+      for (const w of g.war.map.values()) {
+        if (w.isBase || !g.war.atWar(w.owner, f)) continue;
+        const d = Math.hypot(w.def.x - x, w.def.z - z);
+        if (d < bd) {
+          bd = d;
+          best = w.def;
+        }
+      }
+      return yawFromDir(best.x - x, best.z - z);
     };
     if (opt.id === 'hq' || opt.id === 'training') {
       const sp = base.spawns[Math.floor(this.rand() * base.spawns.length)];

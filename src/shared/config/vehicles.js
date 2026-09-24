@@ -40,7 +40,7 @@ export const VEHICLES = {
   recon: {
     id: 'recon', name: 'Ferret Recon Car', cls: 'recon', armor: 'light', hp: 750,
     maxSpeed: 31, reverseSpeed: 10, accel: 11, turnRate: 1.05, halfSize: [1.15, 1.0, 2.5], ground: true,
-    rideHeight: 0.5, respawn: 60, minRank: 3, autoSpot: 70,
+    rideHeight: 0.5, respawn: 60, minRank: 4, autoSpot: 70,
     seats: [
       seat('driver', 0, 1.2, -0.8),
       seat('gunner', 0, 2.0, 0.4, { weapon: 'hmg', turret: true }),
@@ -50,7 +50,7 @@ export const VEHICLES = {
   apc: {
     id: 'apc', name: 'Bulwark APC', cls: 'armored', armor: 'armored', hp: 1700,
     maxSpeed: 18, reverseSpeed: 7, accel: 6, turnRate: 0.7, halfSize: [1.55, 1.35, 3.5], ground: true,
-    rideHeight: 0.55, respawn: 120, minRank: 4, mobileSpawn: true,
+    rideHeight: 0.55, respawn: 120, minRank: 5, mobileSpawn: true,
     seats: [
       seat('driver', -0.6, 1.5, -2.2),
       seat('gunner', 0, 2.6, -0.6, { weapon: 'autocannon', turret: true }),
@@ -63,7 +63,7 @@ export const VEHICLES = {
   tank: {
     id: 'tank', name: 'Warden MBT', cls: 'tank', armor: 'heavy', hp: 2600,
     maxSpeed: 13, reverseSpeed: 6, accel: 4, turnRate: 0.55, halfSize: [1.8, 1.25, 3.9], ground: true, tracked: true,
-    rideHeight: 0.5, respawn: 180, minRank: 5,
+    rideHeight: 0.5, respawn: 180, minRank: 6,
     seats: [
       seat('driver', 0, 1.4, -2.4, { driverWeapon: 'cannon' }),
       seat('gunner', 0, 2.6, 0, { weapon: 'cannon', turret: true }),
@@ -74,7 +74,7 @@ export const VEHICLES = {
   heli: {
     id: 'heli', name: 'Kestrel Helicopter', cls: 'heli', armor: 'light', hp: 1150,
     maxSpeed: 46, reverseSpeed: 12, accel: 12, turnRate: 1.2, halfSize: [1.4, 1.5, 5.2], air: true,
-    climbRate: 11, maxAltitude: 220, respawn: 150, minRank: 6,
+    climbRate: 11, maxAltitude: 320, respawn: 150, minRank: 7, warrant: true,
     seats: [
       seat('driver', 0, 1.3, -2.6),
       seat('gunner', 1.35, 1.4, -0.4, { weapon: 'hmg', turret: true }),
@@ -86,7 +86,7 @@ export const VEHICLES = {
   boat: {
     id: 'boat', name: 'Wavecutter Patrol Boat', cls: 'boat', armor: 'light', hp: 800,
     maxSpeed: 24, reverseSpeed: 7, accel: 8, turnRate: 0.9, halfSize: [1.7, 1.0, 4.6], water: true,
-    rideHeight: 0.3, respawn: 60, minRank: 2,
+    rideHeight: 0.3, respawn: 60, minRank: 3,
     seats: [
       seat('driver', 0, 1.4, -0.6),
       seat('gunner', 0, 1.9, -3.0, { weapon: 'hmg', turret: true }),
@@ -101,6 +101,18 @@ export const VEHICLES = {
     maxSpeed: 40, reverseSpeed: 10, accel: 10, turnRate: 1, halfSize: [1.6, 1.6, 6], air: true,
     climbRate: 10, maxAltitude: 200, respawn: 0, minRank: 99, aiOnly: true,
     seats: [seat('driver', 0, 1.3, -2.6), seat('gunner', 0, 0.6, -3.5, { weapon: 'gunship', turret: true })],
+  },
+  car: {
+    id: 'car', name: 'Staff Car', cls: 'car', armor: 'light', hp: 420,
+    maxSpeed: 32, reverseSpeed: 9, accel: 11, turnRate: 1.15, halfSize: [0.95, 0.8, 2.25], ground: true,
+    rideHeight: 0.35, respawn: 60, minRank: 2,
+    seats: [
+      seat('driver', -0.42, 0.95, -0.3),
+      seat('passenger', 0.42, 0.95, -0.3),
+      seat('passenger', -0.42, 0.95, 0.8),
+      seat('passenger', 0.42, 0.95, 0.8),
+    ],
+    desc: 'Unarmoured staff car. Quick transport between bases and towns.',
   },
 };
 

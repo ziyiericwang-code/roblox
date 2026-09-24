@@ -6,7 +6,7 @@
 // systems (combat, war, missions, AI...) that are updated in a fixed order
 // every tick. Clients never decide outcomes: they send intents, the systems
 // validate and apply them.
-import { TICK_RATE, FACTION, LIFE, ENTITY } from '../shared/constants.js';
+import { TICK_RATE, FACTION, LIFE, ENTITY, COUNTRY_IDS, FACTION_INFO } from '../shared/constants.js';
 import { SpatialHash, dist2D } from '../shared/math.js';
 import { MSG } from '../shared/protocol.js';
 import { GAME } from '../shared/config/game.js';
@@ -25,8 +25,9 @@ import { NPCSystem } from './systems/NPCSystem.js';
 import { VehicleSystem } from './systems/VehicleSystem.js';
 import { WeatherSystem } from './systems/WeatherSystem.js';
 import { TrainingSystem } from './systems/TrainingSystem.js';
-import { AmbientSystem } from './systems/AmbientSystem.js';
 import { NetSystem } from './systems/NetSystem.js';
+import { AdminSystem } from './systems/AdminSystem.js';
+import { HierarchySystem } from './systems/HierarchySystem.js';
 import { RateLimiter } from './util/RateLimiter.js';
 
 export class PlayerSession {
@@ -37,7 +38,7 @@ export class PlayerSession {
     this.name = 'Soldier';
     this.profile = null;
     this.soldier = null;
-    this.faction = FACTION.COALITION;
+    this.faction = FACTION.NONE; // the profile's country once enlisted
     this.state = 'connecting'; // connecting -> menu -> alive/dead
     this.squadId = 0;
     this.trackedMission = 0;
@@ -96,12 +97,14 @@ export class Game {
     this.projectiles = new Set();
     this.props = new Set();
     this.spatial = new SpatialHash(32);
+    this.soldierPool = []; // recycled NPC soldier objects
     this.sessions = new Set();
     this.byProfile = new Map();
     this.npcCap = options.npcCap ?? GAME.npcCap;
     this.tickMsAvg = 0;
     this.running = false;
     this.warDirty = true;
+    this.load = 0; // automatic performance scaling level 0..3
 
     this.progression = new ProgressionSystem(this);
     this.combat = new CombatSystem(this);
@@ -116,8 +119,11 @@ export class Game {
     this.vehicleSys = new VehicleSystem(this);
     this.weather = new WeatherSystem(this);
     this.training = new TrainingSystem(this);
-    this.ambient = new AmbientSystem(this);
     this.net = new NetSystem(this);
+    this.hierarchy = new HierarchySystem(this);
+    this.admin = new AdminSystem(this);
+    // developer performance monitor: rolling per-system cost (ms per tick)
+    this.perf = { systems: {}, msgIn: 0, msgOut: 0, bytesOut: 0, lastReset: 0 };
   }
 
   async init() {
@@ -128,6 +134,7 @@ export class Game {
       this.log.warn('war state load failed, starting fresh', e && e.message);
     }
     this.war.init(warData);
+    this.hierarchy.init();
     this.vehicleSys.init();
     this.weather.init();
     this.missions.init();
@@ -162,35 +169,56 @@ export class Game {
     const t0 = performanceNow();
     this.time += dt;
     this.tickCount++;
-    this.weather.update(dt);
-    this.players.update(dt);
-    this.deploySys.update(dt);
-    this.npc.update(dt);
-    this.vehicleSys.update(dt);
-    this.combat.update(dt);
-    this.war.update(dt);
-    this.missions.update(dt);
-    this.events.update(dt);
-    this.commands.update(dt);
-    this.squads.update(dt);
-    this.training.update(dt);
-    this.ambient.update(dt);
-    this.progression.update(dt);
-    for (const s of this.soldiers) {
-      s.recordHistory(this.time);
-      this.spatial.update(s, s.x, s.z);
-    }
-    for (const v of this.vehicles) this.spatial.update(v, v.x, v.z);
-    this.net.update(dt);
+    this.timed('weather', () => this.weather.update(dt));
+    this.timed('players', () => this.players.update(dt));
+    this.timed('deploy', () => this.deploySys.update(dt));
+    this.timed('npc', () => this.npc.update(dt));
+    this.timed('vehicles', () => this.vehicleSys.update(dt));
+    this.timed('combat', () => this.combat.update(dt));
+    this.timed('war', () => this.war.update(dt));
+    this.timed('missions', () => this.missions.update(dt));
+    this.timed('events', () => this.events.update(dt));
+    this.timed('commands', () => this.commands.update(dt));
+    this.timed('squads', () => this.squads.update(dt));
+    this.timed('training', () => this.training.update(dt));
+    this.timed('hierarchy', () => this.hierarchy.update(dt));
+    this.timed('progression', () => this.progression.update(dt));
+    this.timed('spatial', () => {
+      for (const s of this.soldiers) {
+        s.recordHistory(this.time);
+        this.spatial.update(s, s.x, s.z);
+      }
+      for (const v of this.vehicles) this.spatial.update(v, v.x, v.z);
+    });
+    this.timed('net', () => this.net.update(dt));
+    this.admin.update(dt);
     this.autosave();
     const ms = performanceNow() - t0;
     this.tickMsAvg = this.tickMsAvg * 0.95 + ms * 0.05;
-    // adaptive NPC budget: keep ticks comfortably inside the 50 ms frame
+    // Automatic performance scaling. The tick must stay inside its 50 ms
+    // frame; as it gets heavier the server sheds detail gracefully:
+    //   load 1  fewer live squads per battle, slower distant AI
+    //   load 2  smaller NPC materialisation radius, fewer staff and effects
+    //   load 3  minimum NPC budget
+    // Gameplay rules never change, only how much of the world is simulated in detail.
     if (this.tickCount % 40 === 0) {
       const base = this.options.npcCap ?? GAME.npcCap;
       if (this.tickMsAvg > 28 && this.npcCap > GAME.npcCapMin) this.npcCap = Math.max(GAME.npcCapMin, this.npcCap - 6);
       else if (this.tickMsAvg < 14 && this.npcCap < base) this.npcCap = Math.min(base, this.npcCap + 2);
+      const t = this.tickMsAvg;
+      const up = t > 40 ? 3 : t > 30 ? 2 : t > 22 ? 1 : 0;
+      const down = t < 16 ? 0 : t < 24 ? 1 : t < 33 ? 2 : 3;
+      if (up > this.load) this.load = up;
+      else if (down < this.load) this.load = down;
     }
+  }
+
+  timed(name, fn) {
+    const t0 = performanceNow();
+    fn();
+    const ms = performanceNow() - t0;
+    const p = this.perf.systems;
+    p[name] = (p[name] ?? ms) * 0.95 + ms * 0.05;
   }
 
   // ---------------------------------------------------------------- entities
@@ -204,7 +232,8 @@ export class Game {
   }
 
   addSoldier(opts) {
-    const s = new Soldier(this.allocId(), opts);
+    const pooled = !opts.player && this.soldierPool.length ? this.soldierPool.pop() : null;
+    const s = pooled ? pooled.init(this.allocId(), opts) : new Soldier(this.allocId(), opts);
     s.spawnTime = this.time;
     this.entities.set(s.id, s);
     this.soldiers.add(s);
@@ -244,6 +273,10 @@ export class Game {
     this.props.delete(e);
     this.spatial.remove(e);
     this.net.onEntityRemoved(e);
+    if (e.k === ENTITY.SOLDIER && e.npc && !e.player && this.soldierPool.length < 256) {
+      e.npc = null;
+      this.soldierPool.push(e);
+    }
   }
 
   get(id) {
@@ -372,6 +405,8 @@ export class Game {
     session.id = id;
     session.name = name;
     session.profile = profile;
+    session.faction = COUNTRY_IDS.includes(profile.country) ? profile.country : FACTION.NONE;
+    session.admin = this.admin.isAdmin(id);
     session.state = 'menu';
     session.saveDirty = true;
     this.byProfile.set(id, session);
@@ -383,12 +418,50 @@ export class Game {
       tick: TICK_RATE,
       profile: profileView(profile),
       faction: session.faction,
+      admin: !!session.admin,
       solo: !!this.options.solo,
     });
     this.net.onJoin(session);
+    if (session.faction) this.onEnlisted(session, false);
+  }
+
+  // Country chosen (first join or a transfer). Rank and career are kept.
+  onEnlist(session, msg) {
+    const f = msg.country;
+    if (!COUNTRY_IDS.includes(f) || f === session.faction) return;
+    const p = session.profile;
+    if (session.faction) {
+      if (session.soldier && session.soldier.life !== LIFE.DEAD) {
+        this.notify(session, 'Return to the deployment screen before requesting a transfer.', 'warn');
+        return;
+      }
+      const wait = (p.countryChangedAt || 0) + 30 * 60 * 1000 - Date.now();
+      if (wait > 0 && !session.admin) {
+        this.notify(session, `Transfer requests are allowed every 30 minutes (${Math.ceil(wait / 60000)} min left).`, 'warn');
+        return;
+      }
+      this.squads.onLeave(session);
+      this.missions.onLeave(session);
+      p.countryChangedAt = Date.now();
+      this.progression.record(session, 'transfer', `Transferred to the ${FACTION_INFO[f].army}`);
+    } else {
+      this.progression.record(session, 'enlist', `Enlisted in the ${FACTION_INFO[f].army}`);
+    }
+    p.country = f;
+    session.faction = f;
+    session.saveDirty = true;
+    session.dirtyProfile = true;
+    this.onEnlisted(session, true);
+  }
+
+  onEnlisted(session, fresh) {
+    session.send({ t: MSG.WELCOME, id: session.id, seed: this.world.seed, serverTime: this.time, tick: TICK_RATE, profile: profileView(session.profile), faction: session.faction, admin: !!session.admin, solo: !!this.options.solo, enlisted: true });
+    this.net.onJoin(session);
     this.training.onJoin(session);
     this.deploySys.sendOptions(session);
-    this.radio(session.faction, 'system', 'HQ', `${this.progression.title(session)} has reported for duty.`);
+    this.radio(session.faction, 'system', 'HQ', fresh && !session.profile.trainingComplete
+      ? `${this.progression.title(session)} has enlisted in the ${FACTION_INFO[session.faction].army}.`
+      : `${this.progression.title(session)} has reported for duty.`);
   }
 
   onMessage(session, msg) {
@@ -403,8 +476,14 @@ export class Game {
       return;
     }
     session.lastActiveAt = this.time;
+    this.perf.msgIn++;
+    if (msg.t === MSG.ENLIST) return this.onEnlist(session, msg);
+    if (msg.t === MSG.ADMIN) return this.admin.onMessage(session, msg);
+    if (msg.t === MSG.REQUEST) return this.net.onRequest(session, msg);
+    if (msg.t === MSG.PING) return session.send({ t: MSG.PONG, c: msg.c, s: this.time });
+    if (msg.t === MSG.SETTINGS) return this.progression.onSettings(session, msg);
+    if (!session.faction) return; // everything else needs a country
     switch (msg.t) {
-      case MSG.PING: session.send({ t: MSG.PONG, c: msg.c, s: this.time }); break;
       case MSG.INPUT: this.players.onInput(session, msg); break;
       case MSG.FIRE: this.combat.onPlayerFire(session, msg); break;
       case MSG.RELOAD: this.players.onReload(session); break;
@@ -424,9 +503,10 @@ export class Game {
       case MSG.VFIRE: this.vehicleSys.onFire(session, msg); break;
       case MSG.EMOTE: this.players.onEmote(session, msg); break;
       case MSG.COSMETIC: this.progression.onCosmetic(session, msg); break;
-      case MSG.SETTINGS: this.progression.onSettings(session, msg); break;
       case MSG.TRAINING: this.training.onMessage(session, msg); break;
-      case MSG.REQUEST: this.net.onRequest(session, msg); break;
+      case MSG.PROMOTE: this.progression.onPromote(session, msg); break;
+      case MSG.MAPCMD: this.war.mapCommand(session, msg.cmd, msg.target, msg.from); break;
+      case MSG.TALK: this.hierarchy.onTalk(session, msg); break;
       default: break;
     }
     if (session.violations > 60) {
@@ -513,12 +593,23 @@ export class Game {
     await Promise.all(saves);
   }
 
+  // Inside faction's army headquarters (or any HQ when faction is omitted).
   isBaseArea(x, z, faction) {
-    const b = this.world.bases[faction];
-    if (!b) return false;
-    return Math.abs(x - b.x) < b.rect[0] + 10 && Math.abs(z - b.z) < b.rect[1] + 10;
+    for (const b of Object.values(this.world.bases)) {
+      if (faction && b.faction !== faction) continue;
+      const dx = x - b.x;
+      const dz = z - b.z;
+      const c = Math.cos(-(b.rot || 0) * Math.PI / 2);
+      const sn = Math.sin(-(b.rot || 0) * Math.PI / 2);
+      const lx = dx * c - dz * sn;
+      const lz = dx * sn + dz * c;
+      if (Math.abs(lx) < b.rect[0] + 10 && Math.abs(lz) < b.rect[1] + 10) return true;
+      if (Math.hypot(dx, dz) < Math.max(b.rect[0], b.rect[1]) * 0.9) return true;
+    }
+    return false;
   }
 
+  // Battle area of a territory (sectors and the town around them), or null.
   territoryAt(x, z) {
     let best = null;
     let bd = Infinity;
@@ -530,6 +621,25 @@ export class Game {
       }
     }
     return best;
+  }
+
+  // Region (always a territory on land): which province a point belongs to.
+  regionAt(x, z) {
+    return this.world.territoryAt(x, z);
+  }
+
+  // A friendly base: army HQ, or a territory command post held by the faction
+  // that is not under attack (used for promotions and resupply).
+  isFriendlyBase(x, z, faction) {
+    if (this.isBaseArea(x, z, faction)) return true;
+    for (const t of this.world.territories) {
+      if (this.war.ownerOf(t.id) !== faction) continue;
+      const cp = t.commandPost;
+      if (dist2D(x, z, cp.x, cp.z) > 70) continue;
+      const w = this.war.get(t.id);
+      if (w && (w.state === 'controlled' || w.state === 'liberated')) return true;
+    }
+    return false;
   }
 
   hostileAlive(s) {

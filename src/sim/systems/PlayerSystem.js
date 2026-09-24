@@ -66,6 +66,7 @@ export class PlayerSystem {
       if (ny - ground > 0.4) bad = 'vertical';
     }
     if (!bad && col.pointInSolid(nx, ny + (s.stance === STANCE.PRONE ? 0.3 : 0.9), nz)) bad = 'solid';
+    if (!bad && g.hierarchy.blockedFor(session, nx, ny, nz)) bad = 'restricted';
     if (!bad) {
       const ground = col.groundHeight(nx, nz, ny);
       if (ny - ground > 3 && msg.v[1] > -3 && !(ny < SEA_LEVEL + 0.5)) {
@@ -81,7 +82,8 @@ export class PlayerSystem {
         s.airTime = 0;
       }
       if (horiz > 0.05 || bad !== 'speed') {
-        session.violations += bad === 'speed' && horiz < allowed * 1.6 ? 0.05 : 0.4;
+        if (bad === 'restricted') g.hierarchy.onRestricted(session, nx, ny, nz);
+        else session.violations += bad === 'speed' && horiz < allowed * 1.6 ? 0.05 : 0.4;
         session.send({ t: MSG.CORRECT, p: [r2(s.x), r2(s.y), r2(s.z)] });
       }
       return;

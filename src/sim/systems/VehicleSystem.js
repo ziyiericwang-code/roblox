@@ -5,7 +5,7 @@ import { FACTION, LIFE, STANCE, PROP_KIND, areHostile, SEA_LEVEL } from '../../s
 import { VEHICLES } from '../../shared/config/vehicles.js';
 import { WEAPONS } from '../../shared/config/weapons.js';
 import { XP } from '../../shared/config/economy.js';
-import { rankOf } from '../../shared/config/ranks.js';
+import { rankOf, isWarrant } from '../../shared/config/ranks.js';
 import { stepVehicle, seatWorld } from '../../shared/physics.js';
 import { WEAPON_CODE, spreadDir } from '../../shared/combat.js';
 import { MSG, V } from '../../shared/protocol.js';
@@ -25,7 +25,12 @@ export class VehicleSystem {
       const slot = { type: m.vtype, x: m.x, y: m.y, z: m.z, yaw: m.yaw || 0, base: m.base || null, territory: m.territory || null, faction: m.faction || 0, vehicle: 0, respawnAt: 0 };
       this.slots.push(slot);
     }
-    for (const s of this.slots) this.spawnAtSlot(s);
+    this.slotTimer = 0;
+  }
+
+  // Parked vehicles only exist near players (vehicle level of detail).
+  playerNear(x, z, r) {
+    return this.game.npc.nearPlayer(x, z, r);
   }
 
   slotFaction(slot) {
@@ -37,8 +42,6 @@ export class VehicleSystem {
     const g = this.game;
     const f = this.slotFaction(slot);
     if (!f) return null;
-    // only the player army gets vehicles on territory pads; bases always stock theirs
-    if (!slot.base && f !== FACTION.COALITION) return null;
     const def = VEHICLES[slot.type];
     let y = slot.y;
     if (def.water) y = SEA_LEVEL + def.rideHeight;
@@ -46,6 +49,19 @@ export class VehicleSystem {
     else y = g.world.colliders.groundHeight(slot.x, slot.z, slot.y + 2) + def.rideHeight;
     const v = g.addVehicle(slot.type, { x: slot.x, y, z: slot.z, yaw: slot.yaw, faction: f, slot });
     slot.vehicle = v.id;
+    v.lastUsedAt = g.time;
+    return v;
+  }
+
+  // Sandbox / scripted spawn of a vehicle at a free spot.
+  spawnVehicle(type, x, z, yaw, faction) {
+    const g = this.game;
+    const def = VEHICLES[type];
+    if (!def) return null;
+    let y;
+    if (def.water) y = SEA_LEVEL + def.rideHeight;
+    else y = g.world.colliders.groundHeight(x, z, 800) + (def.air ? 0.1 : def.rideHeight);
+    const v = g.addVehicle(type, { x, y, z, yaw, faction });
     v.lastUsedAt = g.time;
     return v;
   }
@@ -97,10 +113,11 @@ export class VehicleSystem {
     const sd = v.def.seats[i];
     if (!sd) return false;
     if (sd.role === 'passenger') return true;
-    return session.rankIndex >= v.def.minRank;
+    return session.rankIndex >= v.def.minRank || (!!v.def.warrant && isWarrant(session.rankIndex));
   }
 
   seat(s, v, i) {
+    v.asleep = false;
     const g = this.game;
     v.seats[i] = s.id;
     s.vehicle = v.id;
@@ -298,6 +315,7 @@ export class VehicleSystem {
 
   // ------------------------------------------------------------------ damage
   damage(v, amount, attacker, type) {
+    v.asleep = false;
     const g = this.game;
     if (v.state === 3 || amount <= 0) return;
     v.health -= amount;
@@ -348,15 +366,24 @@ export class VehicleSystem {
   update(dt) {
     const g = this.game;
     const col = g.world.colliders;
-    for (const slot of this.slots) {
-      const v = slot.vehicle ? g.get(slot.vehicle) : null;
-      if (!v) {
-        if (!slot.respawnAt) slot.respawnAt = g.time + 20;
-        if (g.time >= slot.respawnAt) {
-          slot.respawnAt = 0;
+    this.slotTimer -= dt;
+    if (this.slotTimer <= 0) {
+      this.slotTimer = 1;
+      for (const slot of this.slots) {
+        const v = slot.vehicle ? g.get(slot.vehicle) : null;
+        const near = this.playerNear(slot.x, slot.z, v ? 900 : 700);
+        if (!v) {
           slot.vehicle = 0;
+          if (!near) continue;
+          if (slot.respawnAt && g.time < slot.respawnAt) continue;
+          slot.respawnAt = 0;
           if (this.slotFaction(slot)) this.spawnAtSlot(slot);
           else slot.respawnAt = g.time + 30;
+        } else if (!near && !v.occupants().length && v.state !== 3 && dist2D(v.x, v.z, slot.x, slot.z) < 30) {
+          // nobody around: park it back into the abstract world
+          g.removeEntity(v);
+          slot.vehicle = 0;
+          slot.respawnAt = 0;
         }
       }
     }
@@ -388,10 +415,14 @@ export class VehicleSystem {
       const driver = v.seats[0] ? g.get(v.seats[0]) : null;
       if (v.ai) this.aiDrive(v, dt);
       else if (!driver || !driver.player || g.time - v.lastDriverUpdate > 1.0) {
-        // unmanned (or driver lagging): coast to a stop with physics
+        // unmanned (or driver lagging): coast to a stop with physics, then sleep
         if (!driver) v.input = { throttle: 0, steer: 0, up: v.def.air ? -1 : 0 };
-        stepVehicle(v, v.input, dt, col);
-      }
+        if (driver || !v.asleep || v.state >= 2) {
+          stepVehicle(v, v.input, dt, col);
+          v.stillT = !driver && Math.abs(v.speed) < 0.05 && Math.abs(v.vy || 0) < 0.05 ? (v.stillT || 0) + dt : 0;
+          v.asleep = v.stillT > 2;
+        }
+      } else v.asleep = false;
       // fire & water damage
       if (v.state === 2) this.damage(v, 7 * dt, null, 'fire');
       if (v.def.ground && v.flooded) {
@@ -594,9 +625,11 @@ export class VehicleSystem {
   directArmor() {
     const g = this.game;
     for (const b of g.war.battles.values()) {
+      if (!b.live) continue;
       const t = g.world.tById[b.territory];
       if (!g.npc.nearPlayer(t.x, t.z, t.radius + 300)) continue;
-      const f = FACTION.DOMINION;
+      const f = this.rng.chance(0.5) ? b.attacker : b.defender;
+      if (g.war.strengthAt(t.id, f) < 50) continue;
       const existing = [...g.vehicles].filter((v) => v.ai && v.ai.type === 'armor' && v.faction === f && v.state !== 3).length;
       if (existing >= 2 || !this.rng.chance(0.5)) continue;
       const type = this.rng.chance(0.4) ? 'tank' : 'apc';
@@ -616,7 +649,7 @@ export class VehicleSystem {
           this.seat(crew, v, si);
         }
       }
-      g.radio(FACTION.COALITION, 'intel', 'Forward Observer', `Enemy ${type === 'tank' ? 'tank' : 'armoured carrier'} moving toward ${t.name}. Engineers, get ready.`, { priority: 1 });
+      for (const e of g.war.enemies(f)) g.radio(e, 'intel', 'Forward Observer', `Enemy ${type === 'tank' ? 'tank' : 'armoured carrier'} moving toward ${t.name}. Engineers, get ready.`, { priority: 1 });
     }
   }
 
