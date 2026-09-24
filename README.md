@@ -27,6 +27,10 @@ Open <http://localhost:3000> and choose:
 
 Other environment variables: `PORT` (default 3000) and `DATA_DIR` (default `./data`).
 
+`npm run build` also writes `dist/frontline-standalone.html`. It is a single
+self-contained file with the solo campaign that you can open straight from
+disk or put on any static host, with no server needed.
+
 ### Controls (keyboard and mouse)
 
 | Action | Key | Action | Key |
