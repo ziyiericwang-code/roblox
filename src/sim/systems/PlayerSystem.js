@@ -75,6 +75,11 @@ export class PlayerSystem {
       if (ny < ground - 1.5) bad = 'underground';
     }
     if (bad) {
+      if (bad === 'flying' || bad === 'underground') {
+        // the last accepted position may itself be airborne: put them back on the ground
+        s.y = col.groundHeight(s.x, s.z, s.y + 0.5);
+        s.airTime = 0;
+      }
       if (horiz > 0.05 || bad !== 'speed') {
         session.violations += bad === 'speed' && horiz < allowed * 1.6 ? 0.05 : 0.4;
         session.send({ t: MSG.CORRECT, p: [r2(s.x), r2(s.y), r2(s.z)] });

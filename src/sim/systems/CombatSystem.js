@@ -29,6 +29,10 @@ export class CombatSystem {
     if (!s || !s.alive || s.vehicle || s.carrying || s.swimming) return;
     if (!V.int(msg.slot, 0, 4) || !V.vec(msg.o) || !V.vec(msg.d, 2)) return;
     if (msg.slot !== s.slot) return;
+    // the view direction at the moment of the shot (inputs are only sent at 20 Hz,
+    // so a fast flick-and-shoot would otherwise be checked against a stale aim)
+    if (V.num(msg.y, -10, 10)) s.yaw = msg.y;
+    if (V.num(msg.pi, -1.6, 1.6)) s.pitch = msg.pi;
     const ws = s.weapon;
     const w = ws && WEAPONS[ws.id];
     if (!w || (w.kind !== 'gun' && w.kind !== 'launcher')) return;

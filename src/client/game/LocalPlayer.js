@@ -445,7 +445,7 @@ export class LocalPlayer {
     const seq = this.fireSeq++;
     const dirs = w.pellets > 1 ? pelletDirs(d, w.pellets, w.spreadHip * 0.8, (seq >>> 0) ^ this.id) : [spreadDir(d, spread, Math.random)];
     const sendDir = w.pellets > 1 ? d : dirs[0];
-    app.send({ t: MSG.FIRE, slot: this.slot, o: [r3(muzzle.x), r3(muzzle.y), r3(muzzle.z)], d: [r4(sendDir.x), r4(sendDir.y), r4(sendDir.z)], seq });
+    app.send({ t: MSG.FIRE, slot: this.slot, o: [r3(muzzle.x), r3(muzzle.y), r3(muzzle.z)], d: [r4(sendDir.x), r4(sendDir.y), r4(sendDir.z)], y: r3(this.yaw), pi: r3(this.pitch), seq });
     // local feedback
     this.bloom = Math.min(w.bloomMax, this.bloom + w.bloomPerShot);
     const kick = w.recoilV * (this.ads ? 0.75 : 1) * (s.stance === STANCE.PRONE ? 0.6 : s.stance === STANCE.CROUCH ? 0.85 : 1) * DEG;
