@@ -22,9 +22,10 @@ const common = {
   logLevel: 'warning',
   jsx: 'automatic',
   jsxImportSource: 'preact',
-  define: { __DEV_TOOLS__: JSON.stringify(dev || process.argv.includes('--dev-tools')) },
+  define: { __DEV_TOOLS__: JSON.stringify(dev || process.argv.includes('--dev-tools')), __ARTIFACT__: 'false' },
 };
 const client = { ...common, entryPoints: [join(root, 'src/client/main.js')], outfile: join(out, 'game.js') };
+const artifactClient = { ...client, outfile: join(out, 'game.artifact.js'), define: { ...common.define, __ARTIFACT__: 'true' } };
 const worker = { ...common, entryPoints: [join(root, 'src/client/net/sim.worker.js')], outfile: join(out, 'sim.worker.js') };
 
 if (process.argv.includes('--watch')) {
@@ -34,7 +35,7 @@ if (process.argv.includes('--watch')) {
   console.log('watching…');
 } else {
   const t0 = Date.now();
-  await Promise.all([build(client), build(worker)]);
+  await Promise.all([build(client), build(worker), build(artifactClient)]);
   writeStandalone();
   console.log(`built in ${Date.now() - t0} ms`);
 }
@@ -54,4 +55,15 @@ function writeStandalone() {
     .replace('<script type="module" src="game.js"></script>', () => `${data}\n<script type="module">\n${js}\n</script>`);
   writeFileSync(join(out, 'global-command.html'), page);
   console.log(`  dist/global-command.html ${(page.length / 1024).toFixed(0)} KB`);
+  // artifact page: the host supplies the document skeleton, so only title, fonts, style and scripts
+  const fonts = html.match(/<link href="https:\/\/fonts\.googleapis\.com[^>]*>/)[0];
+  const art = [
+    '<title>Global Command</title>',
+    fonts,
+    `<style>\n${css}\n</style>`,
+    '<div id="app"><div class="boot"><div class="boot-mark">GLOBAL COMMAND</div><div class="boot-sub" id="boot-status">Loading world…</div></div></div>',
+    data.replace('<script>', '<script>window.__GC_ARTIFACT__=true;'),
+    `<script type="module">\n${readFileSync(join(out, 'game.artifact.js'), 'utf8')}\n</script>`,
+  ].join('\n');
+  writeFileSync(join(out, 'artifact.html'), art);
 }

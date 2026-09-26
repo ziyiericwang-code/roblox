@@ -68,6 +68,10 @@ export class Controller {
 
   afterTurn(view, ms) {
     store.set({ playback: Date.now(), lastTurnMs: ms });
+    if (this.strike) {
+      const list = view.battles.slice().sort((a, b) => b.mine - a.mine).slice(0, 80);
+      list.forEach((b, i) => this.strike.burst(b.prov, { color: b.mine ? [255, 92, 60] : [255, 196, 90], big: b.mine, delay: 0.15 + i * 0.035 }));
+    }
     const mineBattles = view.reports.filter((r) => r.turn === view.turn - 1 && r.players && r.players.includes(view.me.id));
     if (mineBattles.length && !store.state.modal) store.set({ modal: { kind: 'report', id: mineBattles[mineBattles.length - 1].id } });
   }

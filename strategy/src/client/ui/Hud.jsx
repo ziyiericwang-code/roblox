@@ -6,13 +6,33 @@ import { RANKS } from '../../../config/ranks.js';
 import { ELEMENTS } from '../../../config/units.js';
 import { BUILDINGS } from '../../../config/economy.js';
 import { TERRAIN_RULES, WEATHER } from '../../../config/terrain.js';
-import { fmt, Bar, Btn, Insignia, Chip, kindIcon, Row } from './common.jsx';
+import { fmt, Bar, Btn, Insignia, Chip, kindIcon, Row, InlineEdit } from './common.jsx';
 
 const need = (caps, cap) => {
   if (caps.includes(cap)) return null;
   const i = RANKS.findIndex((r) => r.unlock.includes(cap));
   return i >= 0 ? `Requires ${RANKS[i].name}${RANKS[i].appt ? ` (${RANKS[i].appt})` : ''}` : 'Locked';
 };
+
+// DEFCON readiness from world tension (5 = calm, 1 = world war)
+export function defconOf(v) {
+  if (v.worldWar) return 1;
+  return v.tension >= 80 ? 2 : v.tension >= 60 ? 3 : v.tension >= 35 ? 4 : 5;
+}
+function Defcon({ v }) {
+  const n = defconOf(v);
+  return (
+    <span class={`defcon d${n}`} title={`World tension ${v.tension}/100${v.worldWar ? ' · world war' : ''}`}>
+      <em>DEFCON</em>
+      <b>{n}</b>
+      <span class="pips">
+        {[5, 4, 3, 2, 1].map((k) => (
+          <i class={k >= n ? 'on' : ''} />
+        ))}
+      </span>
+    </span>
+  );
+}
 
 export function TopBar({ world, ctl }) {
   const v = useStore((s) => s.view);
@@ -54,9 +74,7 @@ export function TopBar({ world, ctl }) {
             ⛹ <b>{fmt(nat.manpower)}</b>
           </span>
         )}
-        <span title="World tension" class={v.tension > 75 ? 'hot' : ''}>
-          ☢ <b>{v.tension}</b>
-        </span>
+<Defcon v={v} />
       </div>
       <div class="tb-rank" onClick={() => store.set({ panel: 'rank' })} title="Career">
         <Insignia rank={me.rank} size={30} />
@@ -79,8 +97,9 @@ export function TopBar({ world, ctl }) {
 }
 
 export function CommandCard({ world, ctl }) {
+  const openPanel = useStore((s) => s.panel);
   const v = useStore((s) => s.view);
-  if (!v) return null;
+  if (!v || openPanel) return null;
   const me = v.me;
   const cmd = me.command;
   return (
@@ -144,6 +163,7 @@ function Tutorial({ v }) {
 }
 
 const TABS = [
+  ['staff', '✶', 'Staff', 0, 'ai'],
   ['world', '🌐', 'World', 0],
   ['armies', '⚔', 'Armies', 0],
   ['fronts', '▦', 'Fronts', 8],
@@ -162,10 +182,11 @@ const TABS = [
 export function TabRail() {
   const panel = useStore((s) => s.panel);
   const v = useStore((s) => s.view);
+  const ai = useStore((s) => s.ai);
   if (!v) return null;
   return (
     <nav class="tabrail">
-      {TABS.filter(([, , , r]) => v.me.rank >= r).map(([k, icon, label]) => (
+      {TABS.filter(([, , , r, need]) => v.me.rank >= r && (!need || ai)).map(([k, icon, label]) => (
         <button class={panel === k ? 'on' : ''} onClick={() => store.set({ panel: panel === k ? null : k })} title={label}>
           <span>{icon}</span>
           <small>{label}</small>
@@ -470,12 +491,7 @@ function FormationActions({ f, v, ctl, world }) {
           Sea transport
         </Btn>
       ) : null}
-      <Btn onClick={() => {
-        const name = prompt('Rename formation', f.name);
-        if (name) ctl.command({ type: 'rename', f: f.id, name });
-      }}>
-        Rename
-      </Btn>
+      <InlineEdit label="Rename" value={f.name} onSave={(name) => ctl.command({ type: 'rename', f: f.id, name })} />
       <Btn kind="ghost" onClick={() => ctl.command({ type: 'release', f: f.id })} title="Return to national command">
         Release
       </Btn>

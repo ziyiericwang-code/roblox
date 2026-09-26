@@ -4,7 +4,8 @@ import { store, useStore } from '../state/store.js';
 import { RANKS, xpToNext, rankTitle } from '../../../config/ranks.js';
 import { EQUIPMENT } from '../../../config/units.js';
 import { MOBILIZATION } from '../../../config/economy.js';
-import { fmt, Bar, Btn, Chip, Section, Row, Insignia, kindIcon } from './common.jsx';
+import { fmt, Bar, Btn, Chip, Section, Row, Insignia, kindIcon, ConfirmBtn } from './common.jsx';
+import { StaffPanel, HotlineSection, NewsSection } from './AI.jsx';
 
 const needRank = (caps, cap) => {
   if (caps.includes(cap)) return null;
@@ -40,6 +41,7 @@ function WorldPanel({ v, world, ctl }) {
   const top = v.countries.map((c, i) => [i, c.power]).filter(([i]) => v.countries[i].alive).sort((a, b) => b[1] - a[1]).slice(0, 12);
   return (
     <>
+      <NewsSection v={v} world={world} />
       <Section title="World tension">
         <Bar value={v.tension} max={100} color={v.tension > 75 ? 'var(--danger)' : 'var(--accent)'} h={8} />
         <p class="muted">{v.worldWar ? 'WORLD WAR: the great alliances are at war.' : v.tension > 75 ? 'The world is on the brink. Wars spread quickly.' : v.tension > 50 ? 'Tensions are high.' : 'Relative calm.'}</p>
@@ -441,9 +443,9 @@ function DiplomacyPanel({ v, world, ctl }) {
                 {allies.has(sel) && <Btn lock={needRank(caps, 'militaryDiplomacy')} onClick={() => act({ type: 'propose', kind: 'joinwar', target: sel })}>Call to arms</Btn>}
                 {allies.has(sel) && <Btn kind="ghost" lock={needRank(caps, 'diplomacy')} onClick={() => act({ type: 'breakAlliance', target: sel })}>Leave alliance</Btn>}
                 {!allies.has(sel) && (
-                  <Btn kind="danger" lock={needRank(caps, 'war')} onClick={() => confirm(`Declare war on ${world.countries[sel].name}?`) && act({ type: 'declareWar', target: sel })}>
+                  <ConfirmBtn kind="danger" lock={needRank(caps, 'war')} confirmText={`Confirm: war on ${world.countries[sel].name}`} onConfirm={() => act({ type: 'declareWar', target: sel })}>
                     Declare war
-                  </Btn>
+                  </ConfirmBtn>
                 )}
                 {caps.includes('advise') && !caps.includes('war') && <Btn onClick={() => act({ type: 'advise', kind: 'war', target: sel })}>Advise war (10 influence)</Btn>}
               </>
@@ -466,6 +468,7 @@ function DiplomacyPanel({ v, world, ctl }) {
           )}
         </Section>
       )}
+      {sel !== null && <HotlineSection v={v} world={world} ctl={ctl} target={sel} />}
     </>
   );
 }
@@ -494,7 +497,7 @@ function EmpirePanel({ v, world, ctl }) {
               </small>
               <div class="row-btns">
                 <Btn lock={needRank(caps, 'diplomacy')} onClick={() => ctl.command({ type: 'empire', op: 'request', empire: e.id })}>Ask to join</Btn>
-                <Btn onClick={() => confirm(`Serve the ${e.name} as an Imperial Officer? You will command forces of ${cname(world, e.sovereign)}.`) && ctl.command({ type: 'empire', op: 'serve', empire: e.id })}>Serve as officer</Btn>
+                <ConfirmBtn confirmText={`Confirm: command ${cname(world, e.sovereign)} forces`} onConfirm={() => ctl.command({ type: 'empire', op: 'serve', empire: e.id })}>Serve as officer</ConfirmBtn>
               </div>
             </div>
           ))}
@@ -769,6 +772,7 @@ function GrantsSection({ v, world, app }) {
 }
 
 const PANELS = {
+  staff: { title: 'Chief of Staff', C: StaffPanel },
   world: { title: 'World', C: WorldPanel },
   armies: { title: 'Armies', C: ArmiesPanel },
   fronts: { title: 'Fronts', C: FrontsPanel },

@@ -362,6 +362,22 @@ export function applyCommand(g, p, cmd) {
       g.notify('all', { kind: 'event', title: `${g.countryName(p.country)} declares a national emergency`, text: 'Mass mobilization is under way.' });
       return ok();
     }
+    case 'hotline': {
+      // outcome of a leader-to-leader call (the words come from the client; the sim only
+      // accepts a bounded mood swing, once per nation per turn, for national authorities)
+      const t = cmd.target | 0;
+      if (t === p.country || !s.countries[t]?.alive) return fail('Invalid nation');
+      if (!caps.has('diplomacy')) return fail(need(p, 'diplomacy', 'Speaking for the nation'));
+      const mood = Math.max(-2, Math.min(2, Math.round(Number(cmd.mood) || 0)));
+      s.hotline = s.hotline || {};
+      const key = `${p.id}:${t}`;
+      if (s.hotline[key] === s.turn) return fail('You already spoke with them this turn');
+      s.hotline[key] = s.turn;
+      const i = t * g.C + p.country;
+      s.rel[i] = Math.max(-100, Math.min(100, s.rel[i] + mood * 3));
+      if (mood <= -2) s.tension = Math.min(100, s.tension + 0.5);
+      return ok({ mood, opinion: s.rel[i] });
+    }
     case 'advise': {
       if (!caps.has('advise')) return fail(need(p, 'advise', 'Advising national command'));
       if (p.influence < 10) return fail('Not enough Influence (10)');

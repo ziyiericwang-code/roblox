@@ -26,6 +26,18 @@ Open http://localhost:3000 and choose **New campaign** for solo or **Multiplayer
 
 The build also writes a single self-contained file, `dist/global-command.html`. It plays solo with no server; just open it in a browser.
 
+## Claude artifact edition
+
+`npm run build` also writes `dist/artifact.html`, which is published as a Claude artifact. It's the same game, plus the following:
+
+- **Chief of Staff (Claude):** reads your situation and answers questions. When you ask, it gives real orders through the same checked command path as your clicks.
+- **Leader hotline (Claude):** talk to any nation's government, played in character by Claude. As a head of state, the tone of the call moves their opinion of you (once per turn, by a small bounded amount).
+- **WNN bulletin (Claude):** a nightly news summary written from the turn's actual wars, battles and events.
+- **Join with a code, no server:** the commander who creates a campaign hosts it, and their browser runs the world. The lobby and each commander's filtered view are kept in the artifact's shared storage. Requests and replies travel over a room named after the code. Friends need Contributor access to the artifact. The host keeps the tab open while everyone plays; the host's browser keeps the save, so they can resume later.
+- **War-room title screen:** missile arcs between real rival capitals, interceptions, a radar sweep and an intercepted-traffic ticker. In game there is a DEFCON meter driven by world tension, and shockwaves mark each turn's battles.
+
+Claude calls run on the viewer's own Claude account and only happen when they click. `npm run e2e:artifact` tests the join-by-code flow in two browser tabs, using a stand-in for the artifact runtime.
+
 ## Multiplayer
 
 1. **Create a campaign.** Choose players (2–16), mode, scenario, starting rank, turn timer and an optional password.

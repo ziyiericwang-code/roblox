@@ -7,6 +7,8 @@ import { Btn } from './common.jsx';
 import { loadIdentity } from '../net/Online.js';
 import { countryProfile } from './Title.jsx';
 
+const ARTIFACT = typeof window !== 'undefined' && !!window.__GC_ARTIFACT__;
+
 const MODES = {
   private: 'Private multiplayer',
   coop: 'Allied co-op',
@@ -93,10 +95,12 @@ export function MultiplayerScreen({ app }) {
                   ))}
                 </select>
               </div>
-              <div>
-                <label>Password (optional)</label>
-                <input type="password" value={cfg.password} onInput={(e) => set('password', e.target.value)} />
-              </div>
+              {!ARTIFACT && (
+                <div>
+                  <label>Password (optional)</label>
+                  <input type="password" value={cfg.password} onInput={(e) => set('password', e.target.value)} />
+                </div>
+              )}
             </div>
             <label class="check">
               <input type="checkbox" checked={cfg.allowShared} onChange={(e) => set('allowShared', e.target.checked)} /> Allow several commanders in one nation
@@ -113,8 +117,8 @@ export function MultiplayerScreen({ app }) {
           <div class="mp-form">
             <label>Campaign code</label>
             <input class="code-input" value={code} maxLength={7} placeholder="K7X4Q9" onInput={(e) => setCode(e.target.value.toUpperCase())} />
-            <label>Password (if any)</label>
-            <input type="password" value={password} onInput={(e) => setPassword(e.target.value)} />
+            {!ARTIFACT && <label>Password (if any)</label>}
+            {!ARTIFACT && <input type="password" value={password} onInput={(e) => setPassword(e.target.value)} />}
             <Btn kind="primary big" disabled={!online || code.replace(/[\s-]/g, '').length !== 6} onClick={() => act(() => app.joinCampaign(code, password))}>
               Join campaign
             </Btn>
@@ -137,6 +141,11 @@ export function MultiplayerScreen({ app }) {
           </div>
         )}
         {err && <p class="bad">{err}</p>}
+        {ARTIFACT && (
+          <p class="mp-note">
+            Friends play from this same artifact: share it with them in claude.ai with Contributor access, then they open it, choose Multiplayer and type your code. The host's browser runs the world, so the host keeps this tab open while you play.
+          </p>
+        )}
         <Btn kind="ghost" onClick={() => app.leaveOnline()}>Back</Btn>
       </div>
     </div>
@@ -183,7 +192,7 @@ export function LobbyScreen({ app, world }) {
         <div class="code-box">
           <span class="code">{lobby.code}</span>
           <Btn onClick={() => copy(lobby.code)}>Copy code</Btn>
-          <Btn onClick={() => copy(inviteLink)}>Invite link</Btn>
+          {!ARTIFACT && <Btn onClick={() => copy(inviteLink)}>Invite link</Btn>}
         </div>
         <div class="lobby-meta">
           <span>{SCENARIOS[lobby.settings.scenario]?.name}</span>
@@ -239,7 +248,7 @@ export function LobbyScreen({ app, world }) {
               START
             </Btn>
           )}
-          {isHost && <Btn kind="ghost" onClick={() => act({ t: 'regen' })} title="Invalidate the old code">New code</Btn>}
+          {isHost && !ARTIFACT && <Btn kind="ghost" onClick={() => act({ t: 'regen' })} title="Invalidate the old code">New code</Btn>}
         </div>
       </div>
       <div class="setup-right panel-glass">

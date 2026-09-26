@@ -2,42 +2,151 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { store, useStore } from '../state/store.js';
 import { MILITARY, estimateMilitary } from '../../../config/military.js';
-import { SCENARIOS, BLOCS, RIVALRIES, PERSONALITY_OF, PERSONALITIES } from '../../../config/scenario.js';
+import { SCENARIOS, BLOCS, RIVALRIES, PERSONALITY_OF, PERSONALITIES, START_DATE } from '../../../config/scenario.js';
 import { START_RANKS, RANKS } from '../../../config/ranks.js';
 import { fmt, Btn } from './common.jsx';
 
+const SCRAMBLE = 'ABCDEFGHJKLMNPQRSTVWXYZ0123456789#%&/';
+
+// Letters decrypt left to right on load.
+function Decrypt({ text, delay = 0 }) {
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const [out, setOut] = useState(reduced ? text : text.replace(/\S/g, '·'));
+  useEffect(() => {
+    if (reduced) return undefined;
+    const t0 = performance.now() + delay;
+    const id = setInterval(() => {
+      const k = (performance.now() - t0) / 650;
+      if (k >= 1) {
+        setOut(text);
+        clearInterval(id);
+        return;
+      }
+      const n = Math.max(0, Math.floor(k * text.length));
+      setOut(text.slice(0, n) + [...text.slice(n)].map((c) => (c === ' ' ? ' ' : k < 0 ? '·' : SCRAMBLE[(Math.random() * SCRAMBLE.length) | 0])).join(''));
+    }, 32);
+    return () => clearInterval(id);
+  }, [text]);
+  return <span aria-label={text}>{out}</span>;
+}
+
+// Intercepted traffic for the ticker, built from the real rivalries and capitals.
+function intel(world) {
+  const cap = (iso) => {
+    const c = world.countryByIso.get(iso);
+    return c === undefined ? null : { name: world.countries[c].name, city: world.provinces.name[world.countries[c].capital] };
+  };
+  let seed = 7;
+  const rnd = (n) => {
+    seed = (seed * 16807) % 2147483647;
+    return seed % n;
+  };
+  const kinds = [
+    (a, b) => `SIGINT · ${a.name} ↔ ${b.name} · military radio traffic up ${12 + rnd(70)}%`,
+    (a, b) => `IMINT · armored columns moving toward the ${b.name} border`,
+    (a) => `NAVINT · ${a.name} surface group left port, heading unknown`,
+    (a) => `HUMINT · ${a.city}: reservists recalled overnight`,
+    (a, b) => `ELINT · ${b.name} air-defence radars switched to active`,
+    (a) => `OSINT · fuel rationing reported in ${a.city}`,
+    (a, b) => `DIPLO · ${a.name} recalls its ambassador from ${b.name}`,
+  ];
+  const out = [];
+  for (const [x, y] of RIVALRIES) {
+    const a = cap(x);
+    const b = cap(y);
+    if (!a || !b) continue;
+    out.push(kinds[rnd(kinds.length)](a, b));
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+
 export function TitleScreen({ app }) {
   const saves = useStore((s) => s.saves);
+  const ai = useStore((s) => s.ai);
+  const world = app.world;
+  const feed = useMemo(() => intel(world), [world]);
   const last = saves && saves[0];
+  const nations = world.countries.filter((c, i) => world.provincesOf[i].length).length;
   return (
-    <div class="title-screen">
-      <div class="title-card">
-        <div class="title-mark">
-          <span>GLOBAL</span> COMMAND
+    <div class="title-screen war">
+      <div class="war-vignette" aria-hidden="true" />
+      <header class="war-head">
+        <div class="classif">
+          <span class="blink">●</span> TOP SECRET // STRATEGIC COMMAND // {String(START_DATE.day).padStart(2, '0')} JAN {START_DATE.year}
         </div>
-        <div class="title-sub">A world at war. Rise from recruit to supreme commander.</div>
-        <div class="title-actions">
-          {last && (
-            <button class="big primary" onClick={() => app.load(last.slot)}>
-              Continue <small>{last.country} · {RANKS[last.rank]?.name} · {last.date}</small>
-            </button>
-          )}
-          <button class={`big ${last ? '' : 'primary'}`} onClick={() => store.set({ screen: 'setup' })}>
-            New campaign <small>Pick any of 197 countries</small>
+        <h1 class="war-title">
+          <span class="l1">
+            <Decrypt text="GLOBAL" />
+          </span>
+          <span class="l2">
+            <Decrypt text="COMMAND" delay={180} />
+          </span>
+        </h1>
+        <p class="war-sub">The world is one mistake from war. Take command of any nation on Earth, from a single rifle detachment up to the whole war machine.</p>
+      </header>
+      <nav class="war-actions">
+        {last && (
+          <button class="big primary" onClick={() => app.load(last.slot)}>
+            Continue <small>{last.country} · {RANKS[last.rank]?.name} · {last.date}</small>
           </button>
-          <button class="big" onClick={() => store.set({ screen: 'mp' })}>
-            Multiplayer <small>Create or join a campaign with a code</small>
+        )}
+        <button class={`big ${last ? '' : 'primary'}`} onClick={() => store.set({ screen: 'setup' })}>
+          New campaign <small>Pick any of {nations} nations, from recruit to supreme commander</small>
+        </button>
+        <button class="big" onClick={() => store.set({ screen: 'mp' })}>
+          Multiplayer <small>Join friends in one world with a 6-character code</small>
+        </button>
+        {saves && saves.length > 0 && (
+          <button class="big" onClick={() => store.set({ modal: { kind: 'saves' } })}>
+            Load game <small>{saves.length} save{saves.length > 1 ? 's' : ''}</small>
           </button>
-          {saves && saves.length > 0 && (
-            <button class="big" onClick={() => store.set({ modal: { kind: 'saves' } })}>
-              Load game <small>{saves.length} save{saves.length > 1 ? 's' : ''}</small>
-            </button>
-          )}
+        )}
+      </nav>
+      <aside class="war-board" aria-label="Theatre summary">
+        <div class="defcon-big">
+          <small>Readiness</small>
+          <b>DEFCON 3</b>
+          <div class="pips">
+            {[5, 4, 3, 2, 1].map((n) => (
+              <i class={n >= 3 ? 'on' : ''} />
+            ))}
+          </div>
         </div>
-        <div class="title-foot">
-          1,222 provinces · 192 sea zones · real-world forces · 52 ranks · empires
-          <br />
-          Map data: Natural Earth (public domain)
+        <dl>
+          <div>
+            <dt>Provinces</dt>
+            <dd>{world.P.toLocaleString()}</dd>
+          </div>
+          <div>
+            <dt>Sea zones</dt>
+            <dd>{world.S}</dd>
+          </div>
+          <div>
+            <dt>Nations</dt>
+            <dd>{nations}</dd>
+          </div>
+          <div>
+            <dt>Ranks</dt>
+            <dd>{RANKS.length}</dd>
+          </div>
+        </dl>
+        <p>Real-world armies, navies and air forces. Every nation is run by an AI that can do everything you can.</p>
+        {ai && (
+          <div class="ai-live">
+            <b>● CLAUDE ONLINE</b>
+            <span>Your Chief of Staff reads the battlefield and gives orders on request. Foreign leaders answer the hotline in character.</span>
+          </div>
+        )}
+      </aside>
+      <div class="ticker" aria-label="Intercepted traffic">
+        <span class="ticker-label">INTERCEPTS</span>
+        <div class="ticker-window">
+          <div class="ticker-track">
+            {[...feed, ...feed].map((t) => (
+              <span>{t}</span>
+            ))}
+          </div>
         </div>
       </div>
     </div>

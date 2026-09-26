@@ -3,13 +3,17 @@ import { render } from 'preact';
 import { store, useStore, toast } from './state/store.js';
 import { SoloConnection } from './net/Connection.js';
 import { OnlineConnection, serverUrl } from './net/Online.js';
+import { ArtifactOnline } from './net/ArtifactNet.js';
 import { Controller } from './game/Controller.js';
+import { StrikeLayer } from './map/Strike.js';
+import { RIVALRIES } from '../../config/scenario.js';
 import { TitleScreen, SetupScreen } from './ui/Title.jsx';
 import { TopBar, CommandCard, TabRail, MapModes, EndTurn, Toasts, HoverTip, Inspector } from './ui/Hud.jsx';
 import { Drawer } from './ui/Panels.jsx';
 import { Modals, ToolBar } from './ui/Modals.jsx';
 import { MultiplayerScreen, LobbyScreen } from './ui/Multiplayer.jsx';
 import { DevPanel } from './ui/Dev.jsx';
+import { probeAI } from './ui/AI.jsx';
 
 class AppCore {
   constructor(root, world, arcs) {
@@ -25,12 +29,38 @@ class AppCore {
     this.conn = this.solo;
     this.online = null;
     this.ctl = new Controller(world, arcs, this.mapHost, this.conn);
+    // missiles over the title screen, shockwaves on battles after each turn
+    this.strike = new StrikeLayer(this.mapHost, this.ctl.r, world);
+    this.ctl.strike = this.strike;
+    const cap = (iso) => (world.countryByIso.has(iso) ? world.countries[world.countryByIso.get(iso)].capital : -1);
+    // regional rivals plus intercontinental exchanges between the great powers
+    const LONG = [['USA', 'RUS'], ['USA', 'CHN'], ['USA', 'PRK'], ['GBR', 'RUS'], ['FRA', 'RUS'], ['DEU', 'RUS'], ['JPN', 'CHN'], ['JPN', 'PRK'], ['POL', 'RUS'], ['AUS', 'CHN'], ['USA', 'IRN'], ['CAN', 'RUS']];
+    this.strike.setPairs([...RIVALRIES.map(([a, b]) => [cap(a), cap(b)]), ...LONG.concat(LONG).map(([a, b]) => [cap(a), cap(b)])]);
+    let lastScreen = null;
+    const onScreen = (st) => {
+      if (st.screen === lastScreen) return;
+      lastScreen = st.screen;
+      this.strike.setBarrage(st.screen === 'title' || st.screen === 'mp');
+    };
+    store.subscribe(onScreen);
+    onScreen(store.state);
     this.dev = typeof __DEV_TOOLS__ !== 'undefined' && __DEV_TOOLS__ ? true : new URLSearchParams(location.search).has('dev') && location.hostname === 'localhost';
     this.solo.on((m) => {
       if (m.t === 'ready' || m.t === 'saves') store.set({ saves: m.saves || [] });
       if (m.t === 'view' && m.started) store.set({ screen: 'game', panel: null, modal: null });
       if (m.t === 'saved') toast({ kind: 'build', title: 'Game saved', text: m.meta.date });
-      if (m.t === 'export') download(`global-command-turn${m.data.turn}.json`, JSON.stringify(m.data));
+      if (m.t === 'export') {
+        const name = `global-command-turn${m.data.turn}.json`;
+        const text = JSON.stringify(m.data);
+        // __ARTIFACT__ is a build constant: true in the artifact bundle, which compiles the plain-download path out
+        if (__ARTIFACT__ || window.__GC_ARTIFACT__) {
+          // the artifact viewer saves files through its downloads capability, with the viewer's consent
+          const bad = () => toast({ kind: 'error', title: 'Export unavailable', text: 'This viewer cannot save files. Your campaign still autosaves in this browser.' });
+          (window.claude && window.claude.use ? window.claude.use('downloads') : Promise.resolve(null))
+            .then((dl) => (dl ? dl.save({ filename: name, data: text }).then(() => toast({ kind: 'build', title: 'Save exported', text: name })) : bad()))
+            .catch((e) => e && e.code !== 'cancelled' && e.code !== 'declined' && bad());
+        } else download(name, text);
+      }
     });
     // idle drift on the title screen
     this.ctl.map.hooks = ((orig) => (dt) => {
@@ -53,12 +83,13 @@ class AppCore {
     });
     if (new URLSearchParams(location.search).get('join')) store.set({ screen: 'mp' });
     render(<Root app={this} world={world} />, this.uiHost);
+    probeAI(store);
   }
 
   // ------------------------------------------------------------ multiplayer
   goOnline(name) {
     if (this.online) return this.online.ready;
-    const conn = new OnlineConnection(serverUrl(), name);
+    const conn = window.__GC_ARTIFACT__ ? new ArtifactOnline(this.world, name) : new OnlineConnection(serverUrl(), name);
     this.online = conn;
     conn.on((m) => this.onOnline(m));
     return conn.ready.then((w) => {
@@ -86,9 +117,11 @@ class AppCore {
     else if (m.t === 'mine') store.set({ myCampaigns: m.list });
     else if (m.t === 'lobby') {
       store.set({ lobby: m.lobby });
-      if (m.lobby.status === 'lobby' && s.screen !== 'lobby') store.set({ screen: 'lobby' });
+      const mine = m.lobby.members.find((x) => x.id === s.online?.id);
+      const needsNation = m.lobby.status === 'running' && mine && mine.country === null;
+      if ((m.lobby.status === 'lobby' || needsNation) && s.screen !== 'lobby' && s.screen !== 'game') store.set({ screen: 'lobby' });
     } else if (m.t === 'chat') {
-      if (s.lobby) store.set({ lobby: { ...s.lobby, chat: [...s.lobby.chat, m.msg].slice(-40) } });
+      if (s.lobby && !s.lobby.chat.some((c) => c.at === m.msg.at && c.id === m.msg.id)) store.set({ lobby: { ...s.lobby, chat: [...s.lobby.chat, m.msg].slice(-40) } });
       if (s.screen === 'game' && m.msg.id !== s.online?.id) toast({ kind: 'diplo', title: m.msg.from, text: m.msg.text });
     } else if (m.t === 'turn') store.set({ mpTurn: { ready: [], online: [], ...m, localDeadline: m.left ? Date.now() + m.left : 0 }, busy: m.phase === 'resolving' });
     else if (m.t === 'note') {

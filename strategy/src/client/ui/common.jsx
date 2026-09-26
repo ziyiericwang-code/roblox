@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'preact/hooks';
 // Shared UI pieces.
 import { RANKS } from '../../../config/ranks.js';
 
@@ -35,6 +36,46 @@ export function Btn({ children, onClick, disabled, lock, kind = '', title, hot }
       {children}
       {hot && <kbd>{hot}</kbd>}
     </button>
+  );
+}
+
+// Two-step button for irreversible actions (the artifact viewer blocks confirm()).
+export function ConfirmBtn({ children, confirmText = 'Click again to confirm', onConfirm, kind = '', lock, title }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <Btn kind={`${kind}${armed ? ' armed' : ''}`} lock={lock} title={title} onClick={() => {
+      if (armed) {
+        setArmed(false);
+        onConfirm();
+      } else setArmed(true);
+    }}>
+      {armed ? confirmText : children}
+    </Btn>
+  );
+}
+
+// Inline text edit in place of prompt().
+export function InlineEdit({ value, label, onSave }) {
+  const [edit, setEdit] = useState(null);
+  if (edit === null) return <Btn onClick={() => setEdit(value)}>{label}</Btn>;
+  const done = (save) => {
+    if (save && edit.trim()) onSave(edit.trim());
+    setEdit(null);
+  };
+  return (
+    <span class="inline-edit">
+      <input id="inline-edit" value={edit} maxLength={40} autoFocus onInput={(e) => setEdit(e.target.value)} onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') done(true);
+        if (e.key === 'Escape') done(false);
+      }} />
+      <Btn kind="primary" onClick={() => done(true)}>Save</Btn>
+    </span>
   );
 }
 

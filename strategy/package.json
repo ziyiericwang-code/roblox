@@ -11,7 +11,8 @@
     "serve": "node src/server/index.js",
     "test": "node --test \"test/*.test.js\"",
     "e2e": "node scripts/e2e.mjs",
-    "e2e:mp": "node scripts/e2e-mp.mjs"
+    "e2e:mp": "node scripts/e2e-mp.mjs",
+    "e2e:artifact": "node scripts/e2e-artifact.mjs"
   },
   "engines": {
     "node": ">=20"
