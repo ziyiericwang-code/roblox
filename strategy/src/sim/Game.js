@@ -8,7 +8,7 @@ import { runTurn } from './turn.js';
 import { applyCommand } from './commands.js';
 import { buildView } from './view.js';
 import { serialize, deserialize } from './save.js';
-import { refreshCareer } from './career.js';
+import { refreshCareer, issueDirectives, computeArea } from './career.js';
 
 export const PROV_FIELDS = ['owner', 'ctrl', 'lastChange', 'fort', 'infra', 'rail', 'civ', 'mil', 'depot', 'hub', 'armyBase', 'airbase', 'port', 'radar', 'command', 'damage', 'stab', 'unrest'];
 
@@ -172,6 +172,8 @@ export class Game {
     const p = addPlayer(this, id, opts);
     this.index();
     this.refreshDerived();
+    p.area = computeArea(this, p);
+    issueDirectives(this, p);
     return p;
   }
 

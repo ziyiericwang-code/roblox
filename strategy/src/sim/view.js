@@ -144,6 +144,7 @@ export function buildView(g, playerId, { since = -1 } = {}) {
     tutorial: p.tutorial,
     dev: !!p.dev,
     reveal,
+    inbox: p.inbox.slice(-40),
     grantsToMe: grantsToMe.map((gr) => ({ id: gr.id, from: s.players[gr.grantorPlayer]?.name, grantor: gr.grantor, perm: gr.perm, assets: gr.assets })),
     grantsFromMe: (s.grants || []).filter((gr) => gr.grantorPlayer === p.id).map((gr) => ({ id: gr.id, to: s.players[gr.grantee]?.name, perm: gr.perm, assets: gr.assets })),
   };

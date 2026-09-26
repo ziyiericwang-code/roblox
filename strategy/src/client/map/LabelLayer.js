@@ -115,7 +115,9 @@ export class LabelLayer {
 
     // dynamic labels first (unit captions, battle tags): highest priority
     for (const l of this.extra) {
-      const [sx, sy] = r.worldToScreen(l.x, l.y);
+      const [bx, by] = r.worldToScreen(l.x, l.y);
+      const sx = bx + (l.dx || 0);
+      const sy = by + (l.dy || 0);
       if (!onScreen(sx, sy)) continue;
       ctx.font = `${l.weight || 600} ${l.size || 11}px Inter, system-ui, sans-serif`;
       const tw = ctx.measureText(l.text).width + 6;

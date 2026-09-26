@@ -65,9 +65,10 @@ export class MapView {
       this.labelsDirty = true;
       this.emit('camera', c);
     }
-    if (this.labelsDirty) {
+    if (this.labelsDirty || this.labels.dirty) {
       this.labels.draw();
       this.labelsDirty = false;
+      this.labels.dirty = false;
     }
   }
 
