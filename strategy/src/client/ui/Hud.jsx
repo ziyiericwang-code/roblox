@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'preact/hooks';
 // In-game HUD: top bar, command card, tab rail, order bar, map modes, end turn,
 // hover tooltip, toasts and the contextual inspector.
 import { store, useStore } from '../state/store.js';
@@ -15,6 +16,7 @@ const need = (caps, cap) => {
 
 export function TopBar({ world, ctl }) {
   const v = useStore((s) => s.view);
+  const offline = useStore((s) => s.offline);
   if (!v) return null;
   const me = v.me;
   const c = world.countries[me.country];
@@ -23,6 +25,7 @@ export function TopBar({ world, ctl }) {
   const atWar = v.wars.filter((w) => w.attackers.includes(me.country) || w.defenders.includes(me.country));
   return (
     <div class="topbar">
+      {offline && <div class="tb-offline">Connection lost — reconnecting. Your forces follow standing orders.</div>}
       <div class="tb-country" onClick={() => ctl.focusHQ()} title="Center on your command (Home)">
         <i style={{ background: c.color }} />
         <div>
@@ -202,8 +205,29 @@ export function MapModes({ ctl }) {
 export function EndTurn({ ctl }) {
   const busy = useStore((s) => s.busy);
   const v = useStore((s) => s.view);
+  const mp = useStore((s) => s.mpTurn);
+  const offline = useStore((s) => s.offline);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!mp || !mp.localDeadline) return undefined;
+    const i = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(i);
+  }, [mp]);
   if (!v) return null;
   const idle = v.formations.filter((f) => f.mine && !f.order && !f.battle).length;
+  if (mp) {
+    const ready = mp.ready.includes(v.me.id);
+    const waiting = mp.online.filter((id) => !mp.ready.includes(id)).length;
+    const left = mp.localDeadline ? Math.max(0, Math.round((mp.localDeadline - Date.now()) / 1000)) : 0;
+    const clock = left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : '';
+    const resolving = mp.phase === 'resolving';
+    return (
+      <button class={`endturn${resolving ? ' busy' : ready ? ' ready' : ''}${left && left <= 15 ? ' hurry' : ''}`} disabled={offline} onClick={() => ctl.endTurn()} title={ready ? 'Click to keep planning' : 'Ready (Enter)'}>
+        {offline ? 'Reconnecting…' : resolving ? 'Resolving…' : ready ? `Ready ✓${clock ? ` · ${clock}` : ''}` : `End turn${clock ? ` · ${clock}` : ''}`}
+        <small>{resolving ? 'battles, supply, diplomacy' : ready ? `waiting for ${waiting} commander${waiting === 1 ? '' : 's'}` : `${mp.ready.length}/${mp.online.length} ready${idle ? ` · ${idle} idle` : ''}`}</small>
+      </button>
+    );
+  }
   return (
     <button class={`endturn${busy ? ' busy' : ''}`} onClick={() => ctl.endTurn()} title="End turn (Enter)">
       {busy ? 'Resolving…' : 'End turn'}

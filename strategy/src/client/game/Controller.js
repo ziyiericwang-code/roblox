@@ -22,6 +22,13 @@ export class Controller {
     this.unsub = conn.on((m) => this.onMessage(m));
   }
 
+  setConnection(conn) {
+    if (this.unsub) this.unsub();
+    this.conn = conn;
+    this.seenNotes = new Set();
+    this.unsub = conn.on((m) => this.onMessage(m));
+  }
+
   get view() {
     return store.state.view;
   }
@@ -72,6 +79,15 @@ export class Controller {
     return res;
   }
   endTurn() {
+    if (this.conn.online) {
+      // multiplayer: toggle ready; the server resolves when everyone is ready or the timer runs out
+      const t = store.state.mpTurn;
+      if (t && t.phase === 'resolving') return;
+      const me = this.view && this.view.me.id;
+      if (t && t.ready.includes(me)) this.conn.unready();
+      else this.conn.endTurn();
+      return;
+    }
     if (store.state.busy) return;
     store.set({ busy: true, preview: null });
     this.overlay.setPreview(null);

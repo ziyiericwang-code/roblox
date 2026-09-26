@@ -81,7 +81,44 @@ export function DevPanel({ world, ctl }) {
           </div>
           {store.state.lastTurnMs !== undefined && <p class="muted">Last turn resolved in {store.state.lastTurnMs} ms</p>}
         </Section>
+        {ctl.conn.online && <MpDev v={v} world={world} ctl={ctl} />}
       </div>
     </aside>
+  );
+}
+
+function MpDev({ v, world, ctl }) {
+  const [who, setWho] = useState('');
+  const [out, setOut] = useState('');
+  const others = v.players.filter((p) => p.id !== v.me.id);
+  const op = async (m) => {
+    const r = await ctl.conn.request({ t: 'mpdev', ...m });
+    setOut(r.ok ? (r.views ? `${r.views} views · ${r.perView} ms · ${r.kb} KB each` : 'Done') : r.reason);
+  };
+  return (
+    <Section title="Multiplayer testing">
+      <div class="btn-row">
+        <Btn onClick={() => op({ op: 'bot' })}>Add test player</Btn>
+        <Btn onClick={() => op({ op: 'hostfail' })}>Simulate host failure</Btn>
+        <Btn onClick={() => op({ op: 'resolve' })}>Force turn</Btn>
+        <Btn onClick={() => op({ op: 'load', reps: 10 })}>Network load test</Btn>
+      </div>
+      <select value={who} onChange={(e) => setWho(e.target.value)}>
+        <option value="">Choose a commander…</option>
+        {others.map((p) => (
+          <option value={p.id}>
+            {p.name} ({world.countries[p.country].name})
+          </option>
+        ))}
+      </select>
+      <div class="btn-row">
+        <Btn disabled={!who} onClick={() => op({ op: 'drop', player: who })}>Simulate disconnect</Btn>
+        <Btn disabled={!who} onClick={() => op({ op: 'kick', player: who })}>Force leave</Btn>
+        <Btn disabled={!who || store.state.sel?.kind !== 'province'} onClick={() => op({ op: 'country', player: who, country: world.provinces.country[store.state.sel.id] })}>
+          Move to selected nation
+        </Btn>
+      </div>
+      {out && <p class="muted">{out}</p>}
+    </Section>
   );
 }

@@ -663,14 +663,35 @@ function NotesPanel({ ctl }) {
 }
 
 function PlayersPanel({ v, world, app }) {
-  const mp = useStore((s) => s.mp);
+  const mp = useStore((s) => s.lobby);
+  const [msg, setMsg] = useState('');
   return (
     <>
       {mp && (
         <Section title="Campaign">
           <Row k="Name" v={mp.name} />
           <Row k="Join code" v={<span class="code">{mp.code}</span>} />
+          <Row k="Mode" v={mp.settings.mode} />
           <Btn onClick={() => navigator.clipboard && navigator.clipboard.writeText(mp.code)}>Copy code</Btn>
+          <Btn onClick={() => navigator.clipboard && navigator.clipboard.writeText(`${location.origin}${location.pathname}?join=${mp.code}`)}>Copy invite link</Btn>
+        </Section>
+      )}
+      {mp && (
+        <Section title="Chat">
+          <div class="chat-log">
+            {mp.chat.slice(-15).map((c) => (
+              <div>
+                <b>{c.from}:</b> {c.text}
+              </div>
+            ))}
+          </div>
+          <input placeholder="Message all commanders…" value={msg} onInput={(e) => setMsg(e.target.value)} onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter' && msg.trim()) {
+              app.conn.raw({ t: 'chat', text: msg });
+              setMsg('');
+            }
+          }} />
         </Section>
       )}
       <Section title="Commanders">
