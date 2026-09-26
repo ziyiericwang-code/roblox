@@ -147,7 +147,7 @@ async function open(id) {
 }
 const pick = async (p, name) => {
   await p.fill('.setup-right .search', name);
-  await p.click(`.country-list button:has-text("${name}")`);
+  await p.click(`.picker-list .nation:has-text("${name}")`);
   await p.click('.country-card .btn:has-text("Command")');
 };
 try {

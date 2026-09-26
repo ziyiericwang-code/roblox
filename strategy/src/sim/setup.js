@@ -23,7 +23,7 @@ export function setupCampaign(g, settings) {
     scenario,
     settings: { pace: 1, fog: true, mode: 'solo', ...settings, scenario },
     tension: sc.tension,
-    aggression: sc.aggression,
+    aggression: sc.aggression * ([0.5, 1, 1.6].includes(Number(settings.aggression)) ? Number(settings.aggression) : 1),
     prov: {},
     countries: [],
     formations: new Map(),

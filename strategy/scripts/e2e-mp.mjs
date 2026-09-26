@@ -32,7 +32,7 @@ const shot = async (page, name) => {
 };
 const pickCountry = async (page, name) => {
   await page.fill('.setup-right .search', name);
-  await page.click(`.country-list button:has-text("${name}")`);
+  await page.click(`.picker-list .nation:has-text("${name}")`);
   await page.click(`.country-card .btn:has-text("Command")`);
 };
 

@@ -44,7 +44,7 @@ await shot('1-title');
 await page.click('text=New campaign');
 await page.waitForSelector('.setup');
 await page.fill('.setup-right .search', country);
-await page.click(`.country-list button:has-text("${country}")`);
+await page.click(`.picker-list .nation:has-text("${country}")`);
 if (process.env.SCENARIO) await page.click(`text=${process.env.SCENARIO}`);
 if (process.env.RANK) await page.click(`text=${process.env.RANK}`);
 await shot('2-setup');

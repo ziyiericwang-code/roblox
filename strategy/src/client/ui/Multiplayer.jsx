@@ -6,6 +6,7 @@ import { START_RANKS } from '../../../config/ranks.js';
 import { Btn } from './common.jsx';
 import { loadIdentity } from '../net/Online.js';
 import { countryProfile } from './Title.jsx';
+import { CountryPicker } from './CountryPicker.jsx';
 
 const ARTIFACT = typeof window !== 'undefined' && !!window.__GC_ARTIFACT__;
 
@@ -22,7 +23,7 @@ export function MultiplayerScreen({ app }) {
   const [code, setCode] = useState(new URLSearchParams(location.search).get('join') || '');
   const [password, setPassword] = useState('');
   const [tab, setTab] = useState(code ? 'join' : 'create');
-  const [cfg, setCfg] = useState({ name: 'Global War', maxPlayers: 8, scenario: 'cold', mode: 'private', startRank: 0, turnTimer: 120, pace: 1, allowShared: false, joinInProgress: true, password: '' });
+  const [cfg, setCfg] = useState({ name: 'Global War', maxPlayers: 8, scenario: 'cold', mode: 'private', startRank: 0, turnTimer: 120, pace: 1, allowShared: false, joinInProgress: true, password: '', nukes: true, aggression: 1 });
   const online = useStore((s) => s.online);
   const mine = useStore((s) => s.myCampaigns) || [];
   const [err, setErr] = useState(null);
@@ -102,6 +103,23 @@ export function MultiplayerScreen({ app }) {
                 </div>
               )}
             </div>
+            <div class="grid2">
+              <div>
+                <label>AI aggression</label>
+                <select value={cfg.aggression} onChange={(e) => set('aggression', Number(e.target.value))}>
+                  <option value={0.5}>Calm</option>
+                  <option value={1}>Normal</option>
+                  <option value={1.6}>Hawkish</option>
+                </select>
+              </div>
+              <div>
+                <label>Nuclear weapons</label>
+                <select value={cfg.nukes ? 'on' : 'off'} onChange={(e) => set('nukes', e.target.value === 'on')}>
+                  <option value="on">Real arsenals</option>
+                  <option value="off">Disarmed world</option>
+                </select>
+              </div>
+            </div>
             <label class="check">
               <input type="checkbox" checked={cfg.allowShared} onChange={(e) => set('allowShared', e.target.checked)} /> Allow several commanders in one nation
             </label>
@@ -156,7 +174,6 @@ export function LobbyScreen({ app, world }) {
   const lobby = useStore((s) => s.lobby);
   const online = useStore((s) => s.online);
   const [err, setErr] = useState(null);
-  const [q, setQ] = useState('');
   const [chat, setChat] = useState('');
   const [pick, setPick] = useState(null);
   useEffect(() => {
@@ -176,7 +193,6 @@ export function LobbyScreen({ app, world }) {
     if (!r.ok) setErr(r.reason);
     return r;
   };
-  const list = world.countries.map((c, i) => [c.name, i, c.pop]).filter(([n]) => !q || n.toLowerCase().includes(q.toLowerCase())).sort((a, b) => b[2] - a[2]).slice(0, q ? 30 : 20);
   const prof = pick !== null ? countryProfile(world, pick) : null;
   const inviteLink = `${location.origin}${location.pathname}?join=${lobby.code}`;
   const copy = (t) => {
@@ -201,6 +217,8 @@ export function LobbyScreen({ app, world }) {
             {lobby.members.length}/{lobby.settings.maxPlayers} commanders
           </span>
           <span>{lobby.settings.turnTimer ? `${lobby.settings.turnTimer}s turns` : 'ready-up turns'}</span>
+          <span>AI {lobby.settings.aggression === 0.5 ? 'calm' : lobby.settings.aggression === 1.6 ? 'hawkish' : 'normal'}</span>
+          <span>{lobby.settings.nukes === false ? 'no nukes' : '☢ nukes on'}</span>
           <span>{lobby.status}</span>
         </div>
         <h4>Commanders</h4>
@@ -252,15 +270,7 @@ export function LobbyScreen({ app, world }) {
         </div>
       </div>
       <div class="setup-right panel-glass">
-        <input class="search" placeholder="Search nations… or click the map" value={q} onInput={(e) => setQ(e.target.value)} />
-        <div class="country-list">
-          {list.map(([n, i]) => (
-            <button class={`${i === pick ? 'on' : ''}${taken.has(i) ? ' taken' : ''}`} onClick={() => setPick(i)} title={taken.has(i) ? `Taken by ${taken.get(i)}` : ''}>
-              <i style={{ background: world.countries[i].color }} />
-              {n}
-            </button>
-          ))}
-        </div>
+        <CountryPicker world={world} value={pick} onPick={setPick} taken={taken} />
         {prof && (
           <div class="country-card">
             <div class="cc-head">

@@ -25,6 +25,8 @@ export function cleanSettings(input = {}, prev = {}) {
   if (input.turnTimer !== undefined) s.turnTimer = Math.max(0, Math.min(900, Number(input.turnTimer) || 0));
   if (input.pace !== undefined) s.pace = [0.6, 1, 2, 3].includes(Number(input.pace)) ? Number(input.pace) : 1;
   if (input.allowShared !== undefined) s.allowShared = !!input.allowShared;
+  if (input.nukes !== undefined) s.nukes = input.nukes !== false;
+  if (input.aggression !== undefined) s.aggression = [0.5, 1, 1.6].includes(Number(input.aggression)) ? Number(input.aggression) : 1;
   if (input.joinInProgress !== undefined) s.joinInProgress = !!input.joinInProgress;
   if (input.pauseWhenEmpty !== undefined) s.pauseWhenEmpty = !!input.pauseWhenEmpty;
   if (input.password !== undefined) s.passwordHash = input.password ? hash(`gc:${input.password}`) : null;
@@ -261,7 +263,7 @@ export class Campaign {
     const unpicked = this.meta.members.filter((m) => m.country === null);
     if (unpicked.length) return `Waiting for ${unpicked.map((m) => m.name).join(', ')} to pick a nation`;
     const s = this.meta.settings;
-    this.game = Game.create(this.server.world, { scenario: s.scenario, pace: s.pace, mode: s.mode, seed: Math.floor(Math.random() * 2 ** 31) });
+    this.game = Game.create(this.server.world, { scenario: s.scenario, pace: s.pace, mode: s.mode, nukes: s.nukes !== false, aggression: s.aggression || 1, seed: Math.floor(Math.random() * 2 ** 31) });
     this.applyMode();
     for (const m of this.meta.members) this.addToGame(m);
     this.meta.status = 'running';

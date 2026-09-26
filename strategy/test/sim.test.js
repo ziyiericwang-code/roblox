@@ -236,3 +236,10 @@ test('strategic weapons: launch codes, detonation, outrage, missile strikes', as
   assert.ok(g.s.tension >= t0 - 6, 'crisis effects are clamped');
   assert.equal(g.submit('pres', { type: 'crisis', title: 'Again', effects: {} }).ok, false, 'crisis cooldown');
 });
+
+test('campaign options: disarmed world and AI aggression', () => {
+  const off = Game.create(w, { seed: 4, scenario: 'cold', nukes: false, aggression: 1.6 });
+  assert.ok(off.s.nukes.every((n) => n === 0), 'no arsenals in a disarmed world');
+  const base = Game.create(w, { seed: 4, scenario: 'cold' });
+  assert.ok(off.s.aggression > base.s.aggression, 'hawkish AI is more aggressive');
+});

@@ -529,3 +529,32 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin:
 .guide-dots { display: flex; gap: 5px; margin-right: auto; }
 .guide-dots button { width: 18px; height: 4px; border: 0; padding: 0; background: rgba(255,255,255,0.15); border-radius: 2px; }
 .guide-dots button.on { background: var(--accent); }
+
+/* ---------------------------------------------------------------- nation picker */
+.picker { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1 1 auto; }
+.picker-top { display: flex; gap: 6px; }
+.picker-top .search { flex: 1; }
+.dice { flex: none; border: 1px solid var(--line-2); background: rgba(255,255,255,0.05); color: var(--text); border-radius: 6px; padding: 0 10px; font-size: 12px; }
+.dice:hover, .dice:focus-visible { border-color: var(--accent); outline: none; }
+.picker-cats { display: flex; flex-wrap: wrap; gap: 4px; }
+.picker-cats button { flex: none; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--muted); border-radius: 99px; padding: 3px 9px; font-size: 11px; white-space: nowrap; }
+.picker-cats button.on { background: var(--accent); border-color: var(--accent); color: #1b1407; font-weight: 700; }
+.picker-opts { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.picker-opts label { display: flex !important; flex-direction: column; gap: 3px; margin: 0 !important; font-size: 10px !important; flex: 1 1 110px; }
+.picker-opts select { padding: 4px 6px; font-size: 12px; }
+.picker-count { font-family: var(--mono); font-size: 10.5px; color: var(--muted); padding-bottom: 6px; }
+.picker-list { flex: 1 1 auto; min-height: 120px; max-height: 34vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
+.nation { display: grid; grid-template-columns: 10px minmax(0, 1fr) 70px 46px; align-items: center; gap: 8px; text-align: left; border: 1px solid transparent; background: transparent; color: var(--text); border-radius: 4px; padding: 4px 6px; font-size: 12.5px; }
+.nation:hover, .nation:focus-visible { background: rgba(255,255,255,0.05); outline: none; }
+.nation.on { border-color: var(--accent); background: rgba(227,180,83,0.1); }
+.nation.taken { opacity: 0.55; }
+.nation i { width: 10px; height: 10px; border-radius: 2px; }
+.n-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.n-name em { font-style: normal; color: var(--alert); }
+.n-name small { color: var(--muted); }
+.n-bar { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+.n-bar b { display: block; height: 100%; background: linear-gradient(90deg, #7a8da3, var(--accent)); }
+.n-diff { font-size: 9px; letter-spacing: -1px; color: var(--accent); text-align: right; }
+.n-diff.d4, .n-diff.d5 { color: var(--alert); }
+.setup-right { overflow-y: auto; }
+@media (max-width: 720px) { .picker-list { max-height: 22vh; } }

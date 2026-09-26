@@ -34,6 +34,8 @@ function cleanSettings(input = {}, prev = {}) {
   if (input.turnTimer !== undefined) s.turnTimer = Math.max(0, Math.min(900, Number(input.turnTimer) || 0));
   if (input.pace !== undefined) s.pace = [0.6, 1, 2, 3].includes(Number(input.pace)) ? Number(input.pace) : 1;
   if (input.allowShared !== undefined) s.allowShared = !!input.allowShared;
+  if (input.nukes !== undefined) s.nukes = input.nukes !== false;
+  if (input.aggression !== undefined) s.aggression = [0.5, 1, 1.6].includes(Number(input.aggression)) ? Number(input.aggression) : 1;
   if (input.joinInProgress !== undefined) s.joinInProgress = !!input.joinInProgress;
   return s;
 }
@@ -627,7 +629,7 @@ class HostCampaign {
     const unpicked = meta.members.filter((m) => m.country === null);
     if (unpicked.length) return { ok: false, reason: `Waiting for ${unpicked.map((m) => m.nick).join(', ')} to pick a nation` };
     const s = meta.settings;
-    this.game = Game.create(this.net.world, { scenario: s.scenario, pace: s.pace, mode: s.mode, seed: Math.floor(Math.random() * 2 ** 31) });
+    this.game = Game.create(this.net.world, { scenario: s.scenario, pace: s.pace, mode: s.mode, nukes: s.nukes !== false, aggression: s.aggression || 1, seed: Math.floor(Math.random() * 2 ** 31) });
     this.applyMode();
     for (const m of meta.members) this.addToGame(m);
     meta.status = 'running';

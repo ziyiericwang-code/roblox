@@ -11,7 +11,8 @@ export const MISSILE_CP = 3;
 
 export function initStrategic(g) {
   const s = g.s;
-  s.nukes = s.nukes || Array.from({ length: g.C }, (_, c) => ARSENALS[g.w.countries[c].iso3] || 0);
+  const off = s.settings && s.settings.nukes === false;
+  s.nukes = s.nukes || Array.from({ length: g.C }, (_, c) => (off ? 0 : ARSENALS[g.w.countries[c].iso3] || 0));
   s.strikeQueue = s.strikeQueue || [];
   s.strikeLog = s.strikeLog || [];
   s.fallout = s.fallout || {};

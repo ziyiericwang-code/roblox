@@ -5,6 +5,7 @@ import { MILITARY, estimateMilitary } from '../../../config/military.js';
 import { SCENARIOS, BLOCS, RIVALRIES, PERSONALITY_OF, PERSONALITIES, START_DATE } from '../../../config/scenario.js';
 import { START_RANKS, RANKS } from '../../../config/ranks.js';
 import { fmt, Btn } from './common.jsx';
+import { CountryPicker } from './CountryPicker.jsx';
 
 const SCRAMBLE = 'ABCDEFGHJKLMNPQRSTVWXYZ0123456789#%&/';
 
@@ -173,14 +174,14 @@ export function SetupScreen({ app, world }) {
   const [rank, setRank] = useState(0);
   const [name, setName] = useState('Commander');
   const [pace, setPace] = useState(1);
-  const [q, setQ] = useState('');
+  const [nukes, setNukes] = useState(true);
+  const [aggr, setAggr] = useState(1);
   useEffect(() => {
     app.pickMode((c) => setCountry(c));
     return () => app.pickMode(null);
   }, []);
   useEffect(() => app.highlightCountry(country), [country]);
   const prof = useMemo(() => countryProfile(world, country), [country]);
-  const list = useMemo(() => world.countries.map((c, i) => [c.name, i, c.pop]).filter(([n]) => !q || n.toLowerCase().includes(q.toLowerCase())).sort((a, b) => b[2] - a[2]).slice(0, q ? 30 : 16), [q]);
   const m = prof.mil;
   return (
     <div class="setup">
@@ -217,17 +218,26 @@ export function SetupScreen({ app, world }) {
             </button>
           ))}
         </div>
-      </div>
-      <div class="setup-right panel-glass">
-        <input class="search" placeholder="Search countries… or click the map" value={q} onInput={(e) => setQ(e.target.value)} />
-        <div class="country-list">
-          {list.map(([n, i]) => (
-            <button class={i === country ? 'on' : ''} onClick={() => setCountry(i)}>
-              <i style={{ background: world.countries[i].color }} />
-              {n}
+        <label>AI aggression</label>
+        <div class="seg">
+          {[
+            [0.5, 'Calm'],
+            [1, 'Normal'],
+            [1.6, 'Hawkish'],
+          ].map(([v, l]) => (
+            <button class={aggr === v ? 'on' : ''} onClick={() => setAggr(v)}>
+              {l}
             </button>
           ))}
         </div>
+        <label>Nuclear weapons</label>
+        <div class="seg">
+          <button class={nukes ? 'on' : ''} onClick={() => setNukes(true)}>Real arsenals</button>
+          <button class={!nukes ? 'on' : ''} onClick={() => setNukes(false)}>Disarmed world</button>
+        </div>
+      </div>
+      <div class="setup-right panel-glass">
+        <CountryPicker world={world} value={country} onPick={setCountry} />
         <div class="country-card">
           <div class="cc-head">
             <i style={{ background: prof.wc.color }} />
@@ -292,7 +302,7 @@ export function SetupScreen({ app, world }) {
           <Btn kind="ghost" onClick={() => store.set({ screen: 'title' })}>
             Back
           </Btn>
-          <Btn kind="primary big" onClick={() => app.start({ scenario, pace, seed: Math.floor(Math.random() * 1e9) }, { name: name.trim() || 'Commander', country, rank })}>
+          <Btn kind="primary big" onClick={() => app.start({ scenario, pace, nukes, aggression: aggr, seed: Math.floor(Math.random() * 1e9) }, { name: name.trim() || 'Commander', country, rank })}>
             Enlist in {prof.wc.name}
           </Btn>
         </div>
