@@ -1,0 +1,28 @@
+:root {
+  --bg: #0b1119;
+  --panel: rgba(14, 20, 28, 0.94);
+  --panel-2: rgba(22, 30, 40, 0.96);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.14);
+  --text: #e6ebf0;
+  --muted: #8d99a8;
+  --faint: #5d6877;
+  --accent: #e3b453;
+  --accent-2: #f3cf7c;
+  --danger: #e2604e;
+  --ok: #5fc07e;
+  --blue: #74a6dc;
+  --radius: 8px;
+  --font: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; -webkit-font-smoothing: antialiased; overflow: hidden; }
+#app { position: fixed; inset: 0; }
+button { font: inherit; color: inherit; }
+.boot { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 10px; }
+.boot-mark { font-weight: 800; letter-spacing: 0.35em; font-size: 22px; color: var(--accent); }
+.boot-sub { color: var(--muted); }
+.mapview { position: absolute; inset: 0; }
+.map-gl, .map-labels { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.map-labels { cursor: default; }

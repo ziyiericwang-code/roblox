@@ -12,9 +12,12 @@
     "test": "node --test \"test/*.test.js\"",
     "e2e": "node scripts/e2e.mjs"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "earcut": "^3.0.1",
+    "preact": "^10.29.8",
     "ws": "^8.18.0"
   },
   "devDependencies": {
