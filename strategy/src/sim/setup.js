@@ -1,4 +1,5 @@
 // New campaign: provinces, countries, starting forces, diplomacy, and players.
+import { initStrategic } from './strategic.js';
 import { Rng, ordinal, clamp } from './util.js';
 import { MILITARY, estimateMilitary } from '../../config/military.js';
 import { PERSONALITY_OF, BLOCS, PACTS, RIVALRIES, SCENARIOS, PERSONALITIES } from '../../config/scenario.js';
@@ -162,6 +163,7 @@ export function setupCampaign(g, settings) {
     declareWar(g, a, b, { reason: 'Scenario', silent: true });
   }
   void PERSONALITIES;
+  initStrategic(g);
 }
 
 // Convert real-world force levels into formations placed on the map.

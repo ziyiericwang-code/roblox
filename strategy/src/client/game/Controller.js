@@ -39,6 +39,7 @@ export class Controller {
       const turnChanged = this.view && m.view.turn !== this.view.turn;
       store.set({ view: m.view, busy: false });
       this.overlay.setView(m.view);
+      if (this.strike) this.strike.setFallout(m.view.fallout || []);
       // drop selection of formations that no longer exist
       const sel = store.state.sel;
       if (sel && sel.kind === 'formation' && !m.view.formations.some((f) => f.id === sel.id)) this.select(null);
@@ -69,6 +70,15 @@ export class Controller {
   afterTurn(view, ms) {
     store.set({ playback: Date.now(), lastTurnMs: ms });
     if (this.strike) {
+      // strikes that landed this turn: arcs from the launch site, then the impact
+      const strikes = view.strikes.filter((x) => x.turn === view.turn - 1);
+      strikes.forEach((x, i) => this.strike.launch(x.site, x.target, { nuke: x.kind === 'nuke', intercept: x.intercepted, delay: 0.3 + i * 0.25, color: x.kind === 'nuke' ? [255, 255, 235] : [255, 150, 60] }));
+      const nukes = strikes.filter((x) => x.kind === 'nuke');
+      if (nukes.length) {
+        const w = this.w;
+        store.set({ ebs: { items: nukes.map((x) => ({ intercepted: x.intercepted, place: `${w.provinces.name[x.target]}, ${w.countries[x.victim]?.name || ''}`, by: w.countries[x.from]?.name || '?' })) } });
+        if (!nukes.every((x) => x.intercepted)) this.strike.shake(1.2);
+      }
       const list = view.battles.slice().sort((a, b) => b.mine - a.mine).slice(0, 80);
       list.forEach((b, i) => this.strike.burst(b.prov, { color: b.mine ? [255, 92, 60] : [255, 196, 90], big: b.mine, delay: 0.15 + i * 0.035 }));
     }

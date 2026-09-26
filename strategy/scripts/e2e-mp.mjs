@@ -18,6 +18,7 @@ const errors = [];
 async function open(name) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 820 } });
   const page = await ctx.newPage();
+  await page.addInitScript(() => localStorage.setItem('gc.guideSeen', '1'));
   page.on('console', (m) => {
     if (m.type() === 'error' && !/ERR_CERT|fonts\.g/.test(m.text())) errors.push(`${name}: ${m.text()}`);
   });

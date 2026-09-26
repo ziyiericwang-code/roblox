@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useStore, toast } from '../state/store.js';
 import { Btn, Section } from './common.jsx';
-import { getSample, aiLimits, aiError, staffTools, staffBrief, hotlineBrief, newsBrief } from '../ai/claude.js';
+import { getSample, aiLimits, aiError, staffTools, staffBrief, hotlineBrief, newsBrief, crisisBrief } from '../ai/claude.js';
 
 const SUGGEST = ['Situation report', 'Where should I attack next?', 'Which of my formations is in danger?', 'Dig in everything on the front line'];
 
@@ -184,6 +184,70 @@ export function NewsSection({ v, world }) {
       <Btn onClick={go} disabled={busy}>
         {busy ? 'On air…' : text ? 'Refresh bulletin' : 'Run tonight’s bulletin'}
       </Btn>
+    </Section>
+  );
+}
+
+export function CrisisSection({ v, world, ctl }) {
+  const ai = useStore((s) => s.ai);
+  const [crisis, setCrisis] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  if (!ai) return null;
+  const summon = async () => {
+    const sample = await getSample();
+    if (!sample) return;
+    setBusy(true);
+    setDone(null);
+    try {
+      const c = await sample.json(crisisBrief(world, ctl.view), { cache: false });
+      if (!c || !c.title || !Array.isArray(c.options) || !c.options.length) throw { code: 'invalid_json' };
+      setCrisis({ title: String(c.title).slice(0, 120), text: String(c.text || '').slice(0, 600), options: c.options.slice(0, 3) });
+    } catch (e) {
+      const m = aiError(e);
+      if (m) toast({ kind: 'error', title: 'Crisis Director', text: m });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const choose = async (o) => {
+    const e = o.effects || {};
+    const target = e.target ? world.countryByIso.get(String(e.target).toUpperCase()) : undefined;
+    const res = await ctl.command({ type: 'crisis', title: crisis.title, choice: `${o.label}: ${o.outcome || ''}`, effects: { tension: e.tension, stability: e.stability, treasury: e.treasury, opinion: e.opinion, target } });
+    if (res.ok) {
+      setDone({ label: o.label, outcome: o.outcome });
+      setCrisis(null);
+    }
+  };
+  const fx = (e = {}) =>
+    [['tension', 'Tension'], ['stability', 'Stability'], ['treasury', 'Treasury $bn'], ['opinion', e.target ? `${e.target} opinion` : null]]
+      .filter(([k, l]) => l && Number(e[k]))
+      .map(([k, l]) => `${l} ${Number(e[k]) > 0 ? '+' : ''}${Math.round(Number(e[k]))}`)
+      .join(' · ');
+  return (
+    <Section title="Crisis Director">
+      {crisis ? (
+        <div class="crisis">
+          <b>{crisis.title}</b>
+          <p>{crisis.text}</p>
+          {crisis.options.map((o) => (
+            <button class="crisis-opt" onClick={() => choose(o)}>
+              <span>{String(o.label || 'Choose').slice(0, 60)}</span>
+              <small>{String(o.outcome || '').slice(0, 200)}</small>
+              <em>{fx(o.effects)}</em>
+            </button>
+          ))}
+        </div>
+      ) : done ? (
+        <p class="crisis-done">Decision: {done.label}. {done.outcome}</p>
+      ) : (
+        <p class="muted">Claude invents a crisis for your nation from the live situation. Every choice has consequences the simulation enforces.</p>
+      )}
+      {!crisis && (
+        <Btn kind="primary" disabled={busy || !v.me.crisisReady} onClick={summon}>
+          {busy ? 'Something is happening…' : v.me.crisisReady ? 'Trigger a crisis' : 'Next crisis in a few turns'}
+        </Btn>
+      )}
     </Section>
   );
 }

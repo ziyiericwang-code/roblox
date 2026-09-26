@@ -14,6 +14,8 @@ import { Modals, ToolBar } from './ui/Modals.jsx';
 import { MultiplayerScreen, LobbyScreen } from './ui/Multiplayer.jsx';
 import { DevPanel } from './ui/Dev.jsx';
 import { probeAI } from './ui/AI.jsx';
+import { EmergencyBroadcast } from './ui/Strategic.jsx';
+import { guideSeen } from './ui/Guide.jsx';
 
 class AppCore {
   constructor(root, world, arcs) {
@@ -47,7 +49,7 @@ class AppCore {
     this.dev = typeof __DEV_TOOLS__ !== 'undefined' && __DEV_TOOLS__ ? true : new URLSearchParams(location.search).has('dev') && location.hostname === 'localhost';
     this.solo.on((m) => {
       if (m.t === 'ready' || m.t === 'saves') store.set({ saves: m.saves || [] });
-      if (m.t === 'view' && m.started) store.set({ screen: 'game', panel: null, modal: null });
+      if (m.t === 'view' && m.started) store.set({ screen: 'game', panel: null, modal: guideSeen() ? null : { kind: 'guide' } });
       if (m.t === 'saved') toast({ kind: 'build', title: 'Game saved', text: m.meta.date });
       if (m.t === 'export') {
         const name = `global-command-turn${m.data.turn}.json`;
@@ -128,7 +130,7 @@ class AppCore {
       if (s.screen === 'lobby' || (s.screen === 'game' && m.note.kind === 'lobby')) toast({ kind: 'lobby', title: m.note.title, text: m.note.text });
     } else if (m.t === 'view' && (m.started || s.screen === 'lobby')) {
       this.ctl.r.clearModeColors();
-      store.set({ screen: 'game', panel: null, modal: null });
+      store.set({ screen: 'game', panel: null, modal: guideSeen() ? null : { kind: 'guide' } });
     } else if (m.t === 'kicked') {
       toast({ kind: 'error', title: 'Removed', text: m.message });
       this.toMenu();
@@ -274,6 +276,7 @@ function Root({ app, world }) {
       <HoverTip world={world} />
       <Toasts ctl={ctl} />
       <Modals world={world} ctl={ctl} app={app} />
+      <EmergencyBroadcast />
     </div>
   );
 }

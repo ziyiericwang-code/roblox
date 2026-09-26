@@ -199,3 +199,40 @@ test('turn performance stays interactive', () => {
   assert.ok(performance.now() - t0 < 500);
   assert.ok(size < 1_500_000, `view is ${size} bytes`);
 });
+
+test('strategic weapons: launch codes, detonation, outrage, missile strikes', async () => {
+  const { launchCode } = await import('../src/sim/strategic.js');
+  const g = Game.create(w, { seed: 21, scenario: 'cold' });
+  const usa = countryId(w, 'USA');
+  const irn = countryId(w, 'IRN');
+  const p = g.addPlayer('pres', { name: 'President', country: usa, rank: 49 });
+  assert.ok(g.s.nukes[usa] > 10 && g.s.nukes[countryId(w, 'DEU')] === 0, 'real nuclear powers only');
+  const target = w.countries[irn].capital;
+  assert.equal(g.submit('pres', { type: 'nuke', prov: target, code: launchCode(g, p) }).ok, false, 'no release without war');
+  declareWar(g, usa, irn, { silent: true });
+  assert.equal(g.submit('pres', { type: 'nuke', prov: target, code: 'AAA-000' }).ok, false, 'wrong code aborts');
+  const before = g.s.nukes[usa];
+  const ok = g.submit('pres', { type: 'nuke', prov: target, code: launchCode(g, p).toLowerCase() });
+  assert.ok(ok.ok, ok.reason);
+  assert.equal(g.s.nukes[usa], before - 1);
+  const relBefore = g.s.rel[countryId(w, 'FRA') * g.C + usa];
+  g.endTurn();
+  const log = g.s.strikeLog.find((x) => x.kind === 'nuke' && x.from === usa);
+  assert.ok(log, 'the strike resolved');
+  assert.ok(g.s.rel[countryId(w, 'FRA') * g.C + usa] < relBefore, 'the world recoils');
+  if (!log.intercepted) {
+    assert.equal(g.s.tension, 100);
+    assert.ok(g.s.fallout[target] > g.s.turn, 'fallout');
+  }
+  const v = g.view('pres');
+  assert.ok(v.strikes.some((x) => x.kind === 'nuke'), 'strike visible in view');
+  // missile strike + crisis clamping
+  const q = g.addPlayer('col', { name: 'Colonel', country: usa, rank: 40 });
+  q.cp = 20;
+  const m = g.submit('col', { type: 'missile', prov: target });
+  assert.ok(m.ok || /area/.test(m.reason), m.reason);
+  const t0 = g.s.tension;
+  assert.ok(g.submit('pres', { type: 'crisis', title: 'Test', choice: 'x', effects: { tension: -999 } }).ok);
+  assert.ok(g.s.tension >= t0 - 6, 'crisis effects are clamped');
+  assert.equal(g.submit('pres', { type: 'crisis', title: 'Again', effects: {} }).ok, false, 'crisis cooldown');
+});

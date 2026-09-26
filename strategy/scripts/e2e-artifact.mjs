@@ -20,6 +20,7 @@ await new Promise((r) => srv.listen(0, r));
 const url = `http://localhost:${srv.address().port}/`;
 
 function mockRuntime(me) {
+  localStorage.setItem('gc.guideSeen', '1');
   const listeners = new Set();
   const notify = (path) => listeners.forEach((l) => l(path));
   window.addEventListener('storage', (e) => e.key && e.key.startsWith('db:') && notify(e.key.slice(3)));

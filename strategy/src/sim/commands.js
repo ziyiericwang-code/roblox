@@ -13,6 +13,7 @@ import { propose, peaceTerms } from './ai.js';
 import { commandUsage, fillCommand, computeArea, award } from './career.js';
 import { empireCommand } from './empire.js';
 import { devCommand } from './dev.js';
+import { queueStrike, launchCode, initStrategic, MISSILE_CP } from './strategic.js';
 
 const fail = (reason) => ({ ok: false, reason });
 const ok = (extra = {}) => ({ ok: true, ...extra });
@@ -360,6 +361,58 @@ export function applyCommand(g, p, cmd) {
       nat.manpower += g.w.countries[p.country].pop * 0.002;
       nat.stability = Math.max(0, nat.stability - 6);
       g.notify('all', { kind: 'event', title: `${g.countryName(p.country)} declares a national emergency`, text: 'Mass mobilization is under way.' });
+      return ok();
+    }
+    case 'missile': {
+      const t = cmd.prov | 0;
+      if (t < 0 || t >= P) return fail('Invalid target');
+      if (p.rank < 33) return fail(`Missile strikes require the rank of ${RANKS[33].name}`);
+      if (!g.atWar(p.country, s.prov.ctrl[t])) return fail('You can only strike provinces held by an enemy at war with you');
+      if (p.rank < 44 && !p.area[t]) return fail('Outside your operational area');
+      s.missileTurn = s.missileTurn || {};
+      const used = s.missileTurn[p.id] && s.missileTurn[p.id].turn === s.turn ? s.missileTurn[p.id].n : 0;
+      const max = 1 + Math.floor((p.rank - 33) / 6);
+      if (used >= max) return fail(`Missile allocation spent (${max} per turn at your rank)`);
+      if (p.cp < MISSILE_CP) return fail(`Needs ${MISSILE_CP} Command Points`);
+      p.cp -= MISSILE_CP;
+      s.missileTurn[p.id] = { turn: s.turn, n: used + 1 };
+      queueStrike(g, p.country, t, 'missile', p.id);
+      return ok({ queued: true, left: max - used - 1 });
+    }
+    case 'nuke': {
+      initStrategic(g);
+      const t = cmd.prov | 0;
+      if (t < 0 || t >= P) return fail('Invalid target');
+      if (!caps.has('war')) return fail('Only the national command authority can release nuclear weapons');
+      if (s.nukes[p.country] <= 0) return fail('Your nation has no strategic weapons');
+      if (!g.atWar(p.country, s.prov.ctrl[t])) return fail('Nuclear release requires a state of war with the target');
+      const code = String(cmd.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (code !== launchCode(g, p).replace('-', '')) return fail('Authentication failed. Launch aborted.');
+      const why = queueStrike(g, p.country, t, 'nuke', p.id);
+      if (why) return fail(why);
+      return ok({ queued: true, left: s.nukes[p.country] });
+    }
+    case 'crisis': {
+      // a Claude-written crisis: the client proposes, the sim clamps every effect
+      s.crisisTurn = s.crisisTurn || {};
+      if (s.crisisTurn[p.id] !== undefined && s.turn - s.crisisTurn[p.id] < 3) return fail('The next crisis can come in a few turns');
+      const e = cmd.effects || {};
+      const k = p.rank >= 44 ? 1 : 0.5;
+      const num = (v, m) => Math.max(-m, Math.min(m, Number(v) || 0)) * k;
+      const nat = s.countries[p.country];
+      s.tension = Math.max(0, Math.min(100, s.tension + num(e.tension, 6)));
+      nat.stability = Math.max(0, Math.min(100, nat.stability + num(e.stability, 8)));
+      nat.treasury = Math.max(0, nat.treasury + num(e.treasury, 15));
+      const tgt = Number(e.target);
+      if (Number.isInteger(tgt) && tgt >= 0 && tgt < g.C && tgt !== p.country) {
+        const i = tgt * g.C + p.country;
+        s.rel[i] = Math.max(-100, Math.min(100, s.rel[i] + num(e.opinion, 10)));
+      }
+      s.crisisTurn[p.id] = s.turn;
+      const clean = (v, n) => String(v || '').replace(/[<>]/g, '').slice(0, n);
+      const ev = { id: s.nextId.e++, turn: s.turn, kind: 'crisis', title: clean(cmd.title, 120) || 'Crisis', text: `${g.countryName(p.country)}: ${clean(cmd.choice, 200)}` };
+      s.events.push(ev);
+      g.notify(p.country, { kind: 'event', title: ev.title, text: ev.text });
       return ok();
     }
     case 'hotline': {

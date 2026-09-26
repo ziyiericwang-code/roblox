@@ -97,6 +97,9 @@ export function TitleScreen({ app }) {
         <button class="big" onClick={() => store.set({ screen: 'mp' })}>
           Multiplayer <small>Join friends in one world with a 6-character code</small>
         </button>
+        <button class="big" onClick={() => store.set({ modal: { kind: 'guide' } })}>
+          How to play <small>A two-minute field manual: map, orders, turns, ranks, Claude, nukes, multiplayer</small>
+        </button>
         {saves && saves.length > 0 && (
           <button class="big" onClick={() => store.set({ modal: { kind: 'saves' } })}>
             Load game <small>{saves.length} save{saves.length > 1 ? 's' : ''}</small>

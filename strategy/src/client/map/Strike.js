@@ -10,6 +10,8 @@ export class StrikeLayer {
   constructor(host, renderer, world) {
     this.r = renderer;
     this.w = world;
+    this.host = host;
+    this.falloutProvs = [];
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'strike-layer';
     host.append(this.canvas);
@@ -48,13 +50,13 @@ export class StrikeLayer {
     this.start();
   }
 
-  launch(from, to, { color = RED, intercept = false, delay = 0 } = {}) {
+  launch(from, to, { color = RED, intercept = false, delay = 0, nuke = false } = {}) {
     const [ax, ay] = this.r.regionCenter(from);
     let [bx, by] = this.r.regionCenter(to);
     if (bx - ax > 180) bx -= 360;
     if (bx - ax < -180) bx += 360;
     const km = Math.hypot(bx - ax, by - ay);
-    this.missiles.push({ ax, ay, bx, by, t: -delay, dur: 1.6 + Math.min(2.6, km / 60), color, intercept: intercept ? 0.55 + Math.random() * 0.25 : 0, interceptor: null, to });
+    this.missiles.push({ ax, ay, bx, by, t: -delay, dur: (nuke ? 2.6 : 1.6) + Math.min(2.6, km / 60), color, nuke, intercept: intercept ? 0.55 + Math.random() * 0.25 : 0, interceptor: null, to });
     this.start();
   }
 
@@ -145,7 +147,10 @@ export class StrikeLayer {
         }
       }
       if (m.t >= 1) {
-        this.fx.push({ x: m.bx, y: m.by, t: 0, life: 1.6, size: 46 + Math.random() * 30, color: m.color });
+        if (m.nuke) {
+          this.fx.push({ x: m.bx, y: m.by, t: 0, life: 3.6, size: 170, color: [255, 210, 120], nuke: true });
+          this.flash();
+        } else this.fx.push({ x: m.bx, y: m.by, t: 0, life: 1.6, size: 46 + Math.random() * 30, color: m.color });
         this.missiles.splice(i, 1);
       }
     }
@@ -161,10 +166,12 @@ export class StrikeLayer {
       }
       const [x, y] = this.proj(f.x, f.y);
       if (x < -120 || y < -120 || x > W + 120 || y > H + 120) continue;
+      if (f.nuke) this.mushroom(ctx, x, y, k, f.size);
       this.shock(ctx, x, y, k, f.size, f.color);
     }
+    if (this.falloutProvs.length) this.drawFallout(ctx, W, H);
     ctx.globalCompositeOperation = 'source-over';
-    return this.radar || this.missiles.length > 0 || this.fx.length > 0;
+    return this.radar || this.missiles.length > 0 || this.fx.length > 0 || this.falloutProvs.length > 0;
   }
 
   trail(ctx, at, t0, t1, c, alpha) {
@@ -233,6 +240,94 @@ export class StrikeLayer {
       ctx.arc(x, y, 4 + ee * size, 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  // lingering radiation zones, pulsing
+  setFallout(provs) {
+    const key = provs.join(',');
+    if (key === this.falloutKey) return;
+    this.falloutKey = key;
+    this.falloutProvs = provs.slice(0, 60);
+    if (provs.length) this.start();
+  }
+  drawFallout(ctx, W, H) {
+    const z = this.r.camera.zoom;
+    const pulse = this.reduced ? 0.5 : 0.5 + 0.5 * Math.sin(performance.now() / 420);
+    for (const p of this.falloutProvs) {
+      const [wx, wy] = this.r.regionCenter(p);
+      const [x, y] = this.proj(wx, wy);
+      if (x < -80 || y < -80 || x > W + 80 || y > H + 80) continue;
+      const R = Math.max(22, Math.min(140, z * 2.4));
+      const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+      g.addColorStop(0, `rgba(190,255,90,${0.18 + 0.12 * pulse})`);
+      g.addColorStop(0.7, `rgba(150,220,60,${0.08 + 0.06 * pulse})`);
+      g.addColorStop(1, 'rgba(150,220,60,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(210,255,120,${0.35 + 0.3 * pulse})`;
+      ctx.setLineDash([4, 5]);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(x, y, R * 0.8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // fireball and rising column for a nuclear detonation
+  mushroom(ctx, x, y, k, size) {
+    const a = k < 0.15 ? 1 : 1 - (k - 0.15) / 0.85;
+    const fire = ctx.createRadialGradient(x, y, 0, x, y, size * (0.25 + 0.35 * Math.min(1, k * 3)));
+    fire.addColorStop(0, `rgba(255,255,230,${a})`);
+    fire.addColorStop(0.35, `rgba(255,190,80,${a * 0.85})`);
+    fire.addColorStop(0.75, `rgba(230,70,30,${a * 0.5})`);
+    fire.addColorStop(1, 'rgba(120,20,10,0)');
+    ctx.fillStyle = fire;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    const rise = Math.min(1, k * 2.2) * size * 0.55;
+    const cap = ctx.createRadialGradient(x, y - rise, 0, x, y - rise, size * 0.28);
+    cap.addColorStop(0, `rgba(255,170,90,${a * 0.75})`);
+    cap.addColorStop(1, 'rgba(255,120,60,0)');
+    ctx.fillStyle = cap;
+    ctx.beginPath();
+    ctx.ellipse(x, y - rise, size * 0.3, size * 0.18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,200,140,${a * 0.45})`;
+    ctx.lineWidth = size * 0.07;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - rise);
+    ctx.stroke();
+    for (let i = 1; i <= 3; i++) {
+      const kk = Math.min(1, k * (1.2 + i * 0.3));
+      ctx.strokeStyle = `rgba(255,255,255,${(1 - kk) * 0.6})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, kk * size * (1 + i * 0.6), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  flash() {
+    if (this.reduced) return;
+    const d = document.createElement('div');
+    d.className = 'nuke-flash';
+    this.host.append(d);
+    setTimeout(() => d.remove(), 1400);
+    this.shake(1);
+  }
+
+  shake(sec = 1) {
+    if (this.reduced) return;
+    this.host.classList.remove('shake');
+    void this.host.offsetWidth;
+    this.host.classList.add('shake');
+    clearTimeout(this.shakeT);
+    this.shakeT = setTimeout(() => this.host.classList.remove('shake'), sec * 1000);
   }
 
   drawRadar(ctx, W, H, dt) {

@@ -26,6 +26,7 @@ const url = `http://localhost:${server.address().port}/${process.env.PAGE || ''}
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const [w, h] = (process.env.VIEW || '1440x900').split('x').map(Number);
 const page = await browser.newPage({ viewport: { width: w, height: h } });
+await page.addInitScript(() => localStorage.setItem('gc.guideSeen', '1'));
 const errors = [];
 page.on('console', (m) => {
   if (m.type() === 'error' && !/ERR_CERT|fonts\.g/.test(m.text())) errors.push(m.text());

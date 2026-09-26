@@ -1,5 +1,6 @@
 // Per-player view of the world: everything the client may see, filtered by intelligence,
 // clearance, alliances and permission grants. Nothing hidden ever leaves the server.
+import { launchCode } from './strategic.js';
 import { RANKS, xpToNext, capabilities, rankTitle } from '../../config/ranks.js';
 import { MOBILIZATION } from '../../config/economy.js';
 import { PERSONALITIES } from '../../config/scenario.js';
@@ -145,6 +146,10 @@ export function buildView(g, playerId, { since = -1 } = {}) {
     dev: !!p.dev,
     reveal,
     inbox: p.inbox.slice(-40),
+    nukes: (s.nukes || [])[c] || 0,
+    launchCode: caps.has('war') && (s.nukes || [])[c] > 0 ? launchCode(g, p) : null,
+    missiles: p.rank >= 33 ? { max: 1 + Math.floor((p.rank - 33) / 6), used: s.missileTurn && s.missileTurn[p.id] && s.missileTurn[p.id].turn === s.turn ? s.missileTurn[p.id].n : 0 } : null,
+    crisisReady: !s.crisisTurn || s.crisisTurn[p.id] === undefined || s.turn - s.crisisTurn[p.id] >= 3,
     grantsToMe: grantsToMe.map((gr) => ({ id: gr.id, from: s.players[gr.grantorPlayer]?.name, grantor: gr.grantor, perm: gr.perm, assets: gr.assets })),
     grantsFromMe: (s.grants || []).filter((gr) => gr.grantorPlayer === p.id).map((gr) => ({ id: gr.id, to: s.players[gr.grantee]?.name, perm: gr.perm, assets: gr.assets })),
   };
@@ -178,6 +183,10 @@ export function buildView(g, playerId, { since = -1 } = {}) {
     proposals,
     reports,
     events: s.events.slice(-30),
+    // strikes that landed last turn: nuclear ones are seen by everyone, missiles by those involved or watching
+    strikes: (s.strikeLog || []).filter((x) => x.turn >= s.turn - 1 && (x.kind === 'nuke' || x.from === c || x.victim === c || allies.has(x.victim) || intel[x.target] >= 2)),
+    fallout: Object.keys(s.fallout || {}).map(Number),
+    nuclearPowers: (s.nukes || []).map((n, i) => [i, n]).filter(([, n]) => n > 0).map(([i]) => i),
     weather: s.weather ? Array.from(s.weather) : [],
     operations: s.operations.filter((op) => op.owners.includes(p.id) || op.country === c),
     empires,

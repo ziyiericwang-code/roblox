@@ -16,7 +16,7 @@ const need = (caps, cap) => {
 
 // DEFCON readiness from world tension (5 = calm, 1 = world war)
 export function defconOf(v) {
-  if (v.worldWar) return 1;
+  if (v.worldWar || (v.fallout && v.fallout.length) || v.tension >= 95) return 1;
   return v.tension >= 80 ? 2 : v.tension >= 60 ? 3 : v.tension >= 35 ? 4 : 5;
 }
 function Defcon({ v }) {
@@ -172,6 +172,7 @@ const TABS = [
   ['economy', '$', 'Economy', 14],
   ['production', '⚙', 'Production', 43],
   ['air', '✈', 'Air & Navy', 33],
+  ['strategic', '☢', 'Strategic', 33],
   ['diplomacy', '✉', 'Diplomacy', 0],
   ['empire', '♛', 'Empire', 0],
   ['rank', '★', 'Career', 0],

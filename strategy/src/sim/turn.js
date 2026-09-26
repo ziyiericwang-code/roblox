@@ -10,6 +10,7 @@ import { eventsTurn } from './events.js';
 import { empireTurn } from './empire.js';
 import { careerTurn, award } from './career.js';
 import { clamp } from './util.js';
+import { strategicTurn } from './strategic.js';
 
 export function runTurn(g) {
   const s = g.s;
@@ -28,6 +29,7 @@ export function runTurn(g) {
     fallbackTriggers(g);
   });
   time('ai', () => aiTurn(g));
+  time('strategic', () => strategicTurn(g));
   time('air', () => {
     computeAir(g);
     updateWeather(g);

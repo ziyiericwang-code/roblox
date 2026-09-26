@@ -1,4 +1,6 @@
 // Modal dialogs and map tool bars.
+import { LaunchModal } from './Strategic.jsx';
+import { Guide } from './Guide.jsx';
 import { useState } from 'preact/hooks';
 import { store, useStore } from '../state/store.js';
 import { RANKS } from '../../../config/ranks.js';
@@ -15,6 +17,8 @@ export function Modals({ world, ctl, app }) {
   else if (modal.kind === 'menu') body = <Menu close={close} app={app} v={v} />;
   else if (modal.kind === 'saves') body = <Saves close={close} app={app} />;
   else if (modal.kind === 'help') body = <Help close={close} />;
+  else if (modal.kind === 'guide') body = <Guide close={close} />;
+  else if (modal.kind === 'launch') body = <LaunchModal modal={modal} v={v} world={world} ctl={ctl} close={close} />;
   else if (modal.kind === 'operation') body = <OperationPlan modal={modal} close={close} v={v} world={world} ctl={ctl} />;
   else if (modal.kind === 'recon') {
     store.set({ modal: null, tool: 'recon', toolFor: modal.f, toolProvs: [] });
@@ -132,7 +136,8 @@ function Menu({ close, app, v }) {
       }}>Save game</Btn>
       <Btn onClick={() => store.set({ modal: { kind: 'saves' } })}>Load game</Btn>
       <Btn onClick={() => app.exportSave()}>Export save file</Btn>
-      <Btn onClick={() => store.set({ modal: { kind: 'help' } })}>How to play</Btn>
+      <Btn onClick={() => store.set({ modal: { kind: 'guide' } })}>Field manual</Btn>
+      <Btn onClick={() => store.set({ modal: { kind: 'help' } })}>Controls</Btn>
       {v && v.me.dev && <Btn onClick={() => store.set({ panel: 'dev', modal: null })}>Developer tools</Btn>}
       <Btn kind="ghost" onClick={() => app.quit()}>Quit to title</Btn>
       <Btn kind="primary" onClick={close}>Resume</Btn>
@@ -238,15 +243,19 @@ export function ToolBar({ ctl, world }) {
     sea: 'Click a coastal province to sail there.',
     recon: 'Click a province to reconnoitre (1 CP).',
     strike: 'Click any province to strike it.',
+    missile: 'Click an enemy province for the missile strike (3 CP).',
+    nuke: 'Designate the nuclear target. Right-click to cancel.',
     teleport: 'Click a province to teleport the formation (dev).',
   }[tool];
-  const single = tool === 'sea' || tool === 'recon' || tool === 'strike' || tool === 'teleport';
+  const single = tool === 'sea' || tool === 'recon' || tool === 'strike' || tool === 'teleport' || tool === 'missile' || tool === 'nuke';
   if (single && provs.length) {
     const target = provs[provs.length - 1];
     store.set({ tool: null, toolProvs: [] });
     if (tool === 'sea') ctl.command({ type: 'sea', f: toolFor, to: target });
     if (tool === 'recon') ctl.command({ type: 'recon', f: toolFor, prov: target });
     if (tool === 'strike') ctl.command({ type: 'empire', op: 'strike', prov: target });
+    if (tool === 'missile') ctl.command({ type: 'missile', prov: target }).then((r) => r.ok && ctl.strike && ctl.strike.launch(ctl.view.countries[ctl.view.me.country].capital, target, { color: [255, 150, 60] }));
+    if (tool === 'nuke') store.set({ modal: { kind: 'launch', prov: target } });
     if (tool === 'teleport') ctl.command({ type: 'dev', action: 'teleport', f: toolFor, prov: target });
     return null;
   }

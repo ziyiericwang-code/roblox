@@ -150,6 +150,15 @@ export function staffTools(world, ctl) {
       },
     },
     {
+      name: 'order_missile_strike',
+      description: 'Launches a conventional theatre missile strike (3 Command Points, limited per turn) at an enemy-held province, shattering the organization of enemy units there. Lands when the turn ends. Only when the commander asks for strikes.',
+      inputSchema: { type: 'object', properties: { province_id: { type: 'integer' } }, required: ['province_id'] },
+      async execute({ province_id }) {
+        const res = await ctl.command({ type: 'missile', prov: Number(province_id) }, { quiet: true });
+        return res.ok ? `Missile strike queued on ${pn(world, Number(province_id))}; ${res.left} left this turn.` : `Refused: ${res.reason}`;
+      },
+    },
+    {
       name: 'order_posture',
       description: 'Sets a formation posture: "hold" (stop and hold), "digin" (entrench), or "withdraw" (pull out of battle). Returns the result.',
       inputSchema: { type: 'object', properties: { formation_id: { type: 'integer' }, posture: { type: 'string', enum: ['hold', 'digin', 'withdraw'] } }, required: ['formation_id', 'posture'] },
@@ -167,7 +176,7 @@ export function staffBrief(world, v) {
 
 Rules you know: formations move and attack along land borders; attacks across rivers and straits are weaker; entrenched defenders in mountains, forests and cities are strong; encircled units lose supply; each rank limits how many orders the commander can give per turn. Orders take effect when the turn ends.
 
-Use the tools to look things up rather than guessing ids. Only call order_move or order_posture when the commander explicitly asks you to act or approves a plan; otherwise recommend. After issuing orders, report exactly what was accepted or refused.
+Use the tools to look things up rather than guessing ids. Nuclear weapons are the head of state's decision alone: never offer to launch them. Only call order_move, order_posture or order_missile_strike when the commander explicitly asks you to act or approves a plan; otherwise recommend. After issuing orders, report exactly what was accepted or refused.
 
 CURRENT SITUATION
 ${situation(world, v)}`;
@@ -195,4 +204,17 @@ World tension: ${v.tension}/100${v.worldWar ? ' (WORLD WAR)' : ''}.
 Wars: ${wars.join('; ') || 'none'}.
 Battles this turn: ${hot.join('; ') || 'none'}.
 Events: ${lt.join('; ') || 'quiet'}.`;
+}
+
+// Crisis Director: Claude invents a crisis with 2-3 trade-off choices; the sim clamps effects.
+export function crisisBrief(world, v) {
+  const me = v.me.country;
+  const related = new Set([...warsOf(v, me), ...alliesOf(v, me)]);
+  v.rel.map((r, i) => [r, i]).filter(([, i]) => i !== me && v.countries[i].alive).sort((a, b) => Math.abs(b[0]) - Math.abs(a[0])).slice(0, 14).forEach(([, i]) => related.add(i));
+  const codes = [...related].slice(0, 26).map((i) => `${world.countries[i].iso3}=${world.countries[i].name} (our opinion ${v.rel[i]})`);
+  return `You are the Crisis Director of GLOBAL COMMAND, a fictional 2030 war-strategy game. Invent ONE sudden, specific, dramatic crisis for the player's nation that fits the situation below (espionage scandal, border incident, defector, cyberattack, refugee wave, coup rumour, hostage standoff, leaked plans, rogue general, etc.). Name real places. Give 2 or 3 choices with genuine trade-offs, no obviously best option.
+${situation(world, v)}
+Nations you may involve (ISO3 code = name): ${codes.join('; ')}.
+Reply with ONLY JSON:
+{"title": "<headline, max 8 words>", "text": "<the situation, max 60 words>", "options": [{"label": "<max 6 words>", "outcome": "<what happens, max 25 words>", "effects": {"tension": <int -6..6>, "stability": <int -8..8>, "treasury": <int -15..15>, "target": "<ISO3 from the list or empty>", "opinion": <int -10..10, how target's opinion of us changes>}}]}`;
 }

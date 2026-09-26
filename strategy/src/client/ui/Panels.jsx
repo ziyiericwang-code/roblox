@@ -5,7 +5,8 @@ import { RANKS, xpToNext, rankTitle } from '../../../config/ranks.js';
 import { EQUIPMENT } from '../../../config/units.js';
 import { MOBILIZATION } from '../../../config/economy.js';
 import { fmt, Bar, Btn, Chip, Section, Row, Insignia, kindIcon, ConfirmBtn } from './common.jsx';
-import { StaffPanel, HotlineSection, NewsSection } from './AI.jsx';
+import { StaffPanel, HotlineSection, NewsSection, CrisisSection } from './AI.jsx';
+import { StrategicPanel } from './Strategic.jsx';
 
 const needRank = (caps, cap) => {
   if (caps.includes(cap)) return null;
@@ -42,6 +43,7 @@ function WorldPanel({ v, world, ctl }) {
   return (
     <>
       <NewsSection v={v} world={world} />
+      <CrisisSection v={v} world={world} ctl={ctl} />
       <Section title="World tension">
         <Bar value={v.tension} max={100} color={v.tension > 75 ? 'var(--danger)' : 'var(--accent)'} h={8} />
         <p class="muted">{v.worldWar ? 'WORLD WAR: the great alliances are at war.' : v.tension > 75 ? 'The world is on the brink. Wars spread quickly.' : v.tension > 50 ? 'Tensions are high.' : 'Relative calm.'}</p>
@@ -773,6 +775,7 @@ function GrantsSection({ v, world, app }) {
 
 const PANELS = {
   staff: { title: 'Chief of Staff', C: StaffPanel },
+  strategic: { title: 'Strategic Command', C: StrategicPanel },
   world: { title: 'World', C: WorldPanel },
   armies: { title: 'Armies', C: ArmiesPanel },
   fronts: { title: 'Fronts', C: FrontsPanel },
